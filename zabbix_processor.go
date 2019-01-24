@@ -1,12 +1,12 @@
 package main
 
 import (
+	"./zabbix"
 	"flag"
 	"fmt"
 	log "github.com/inconshreveable/log15"
 	"math"
 	"os"
-	"github.com/cbuehlmann/zabbix_processor/zabbix"
 	"strconv"
 	"time"
 )
@@ -29,10 +29,10 @@ func fetch(session zabbix.Session, item int, date time.Time, window time.Duratio
 }
 
 func getClosestValue(timepoint time.Time, values []zabbix.Value) zabbix.Value {
-	closest := 3600.0*24*356	// 1Y
+	closest := 3600.0 * 24 * 356 // 1Y
 	index := -1
 	for i, value := range values {
-		if closest > math.Abs(float64(timepoint.Unix() - value.Clock)) {
+		if closest > math.Abs(float64(timepoint.Unix()-value.Clock)) {
 			index = i
 		}
 	}
@@ -55,7 +55,7 @@ func compareWeeks(session zabbix.Session, item int, weeks int, window time.Durat
 	if len(values) == 0 {
 		Log.Error("no current value found in window",
 			"from", now.Add(-window).Format("01-02 15:04:05"),
-			"to", now.Add(window).Format("01-02 15:04:05") )
+			"to", now.Add(window).Format("01-02 15:04:05"))
 		os.Exit(10)
 	}
 	current, _ := strconv.ParseFloat(values[0].Value, 64)
@@ -65,20 +65,20 @@ func compareWeeks(session zabbix.Session, item int, weeks int, window time.Durat
 	tp := now
 	oneWeek := time.Hour * 24 * 7
 	for i := 0; i < weeks; i++ {
-		tp = tp.Add(-oneWeek)	// step one week back
+		tp = tp.Add(-oneWeek) // step one week back
 		closest := getClosestValue(tp, fetch(session, item, tp, window))
 		if closest.Clock != 0 {
 			value, _ := strconv.ParseFloat(closest.Value, 64)
 			historicValues[i] = value
 			when := time.Unix(closest.Clock, closest.Nano)
-			Log.Info("historic value", log.Ctx{ "value": value, "date": when.Format("Mon 01-02 15:04:05")} )
+			Log.Info("historic value", log.Ctx{"value": value, "date": when.Format("Mon 01-02 15:04:05")})
 		} else {
 			historicValues[i] = math.NaN()
 		}
 	}
 
 	historic := average(historicValues)
-	Log.Info("calculation done", log.Ctx{ "average": historic, "current": current, "difference": current - historic })
+	Log.Info("calculation done", log.Ctx{"average": historic, "current": current, "difference": current - historic})
 
 	return current - historic
 
@@ -100,7 +100,7 @@ func main() {
 	Log.SetHandler(log.DiscardHandler())
 
 	// data access
-	apiUrl := flag.String("url",  "http://127.0.0.1/zabbix/api_jsonrpc.php", "ZABBIX api url")
+	apiUrl := flag.String("url", "http://127.0.0.1/zabbix", "ZABBIX webfrontend base url. /api_jsonrpc.php will be appended")
 	username := flag.String("username", "", "ZABBIX username")
 	password := flag.String("password", "", "ZABBIX password")
 	itemId := flag.Int("itemid", 37364, "ZABBIX item id. obtain it from the frontend: url: http:/127.0.0.1/zabbix/history.php?action=showgraph&itemid=37364&sid=23bue3f84af4c3")
@@ -116,7 +116,7 @@ func main() {
 	flag.Parse()
 
 	if *username == "" {
-		fmt.Fprintln(os.Stderr, "missing username. provide option -username=")
+		_, _ = fmt.Fprintln(os.Stderr, "missing username. provide option -username=")
 		os.Exit(2)
 	}
 
@@ -125,17 +125,17 @@ func main() {
 		zabbix.Log.SetHandler(log.StdoutHandler)
 	}
 
-	s := zabbix.Session{ URL: *apiUrl }
-	Log.Info("authenticating" , "server",  s.URL)
+	s := zabbix.Session{URL: *apiUrl + "/api_jsonrpc.php"}
+	Log.Info("authenticating", "server", s.URL)
 	err := zabbix.Login(&s, *username, *password)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "login failed", err)
+		_, _ = fmt.Fprintln(os.Stderr, "login failed", err)
 		os.Exit(3)
 	}
 
 	Log.Info("login successful", "token", s.Token)
 	halfWindow := time.Duration(*window / 2)
-	result := compareWeeks(s, *itemId, *weeks, halfWindow * time.Second)
+	result := compareWeeks(s, *itemId, *weeks, halfWindow*time.Second)
 
 	if *command {
 		Log.Debug("print zabbix_sender command template to stdout", "value", result)
