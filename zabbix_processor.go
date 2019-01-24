@@ -1,7 +1,7 @@
 package main
 
 import (
-	"./zabbix"
+	zabbix "github.com/cbuehlmann/zabbix_processor/zabbix"
 	"flag"
 	"fmt"
 	log "github.com/inconshreveable/log15"
