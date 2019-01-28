@@ -1,9 +1,9 @@
 package main
 
 import (
-	zabbix "github.com/cbuehlmann/zabbixtools/zabbix"
 	"flag"
 	"fmt"
+	zabbix "github.com/cbuehlmann/zabbixtools/zabbix"
 	log "github.com/inconshreveable/log15"
 	"math"
 	"os"
@@ -99,25 +99,36 @@ func average(values []float64) float64 {
 func main() {
 	Log.SetHandler(log.DiscardHandler())
 
-	// data access
-	apiUrl := flag.String("url", "http://127.0.0.1/zabbix", "ZABBIX webfrontend base url. /api_jsonrpc.php will be appended")
+	// configuration
+	configfile := flag.String("config", "~/.zabbix_processor.yml", "configuration.")
+
+	apiUrl := flag.String("url", "http://127.0.0.1/zabbix/api_jsonrpc.php", "ZABBIX frontend/API URL")
 	username := flag.String("username", "", "ZABBIX username")
 	password := flag.String("password", "", "ZABBIX password")
-	itemId := flag.Int("itemid", 37364, "ZABBIX item id. obtain it from the frontend: url: http:/127.0.0.1/zabbix/history.php?action=showgraph&itemid=37364&sid=23bue3f84af4c3")
+
+	// operation
+	verbose := flag.Bool("verbose", false, "just print result")
 
 	// algorithm parameters
 	weeks := flag.Int("weeks", 3, "numbers of weeks back")
 	window := flag.Int64("window", 3600, "historic value search window size in seconds. 3600 for 1 hour")
 
 	// configure output
-	command := flag.Bool("command", false, "print ZABBIX trapper command template")
-	verbose := flag.Bool("verbose", false, "just print result")
+	output := flag.String("outpt", "-", "write trapper format")
 
 	flag.Parse()
 
-	if *username == "" {
-		_, _ = fmt.Fprintln(os.Stderr, "missing username. provide option -username=")
-		os.Exit(2)
+	var configuration Configuration
+
+	if *configfile != "" {
+		var err error
+		configuration, err = ReadConfigurationFromFile(*configfile)
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "unable to parse configuration file", *configfile, err)
+			os.Exit(2)
+		}
+	} else {
+		configuration = Configuration{}
 	}
 
 	if *verbose {
@@ -125,26 +136,56 @@ func main() {
 		zabbix.Log.SetHandler(log.StdoutHandler)
 	}
 
+	if *username != "" {
+		if configuration.Zabbix.Api.Username != "" {
+			Log.Debug("username from command line overrides configuration value")
+		}
+		configuration.Zabbix.Api.Username = *username
+	}
+
+	if *apiUrl != "" {
+		if configuration.Zabbix.Api.URL != "" {
+			Log.Debug("api uri from command line overrides configuration value")
+		}
+		configuration.Zabbix.Api.URL = *apiUrl
+	}
+
 	s := zabbix.Session{URL: *apiUrl + "/api_jsonrpc.php"}
 	Log.Info("authenticating", "server", s.URL)
-	err := zabbix.Login(&s, *username, *password)
+	err := zabbix.Login(&s, configuration.Zabbix.Api.Username, *password)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "login failed", err)
 		os.Exit(3)
 	}
-
 	Log.Info("login successful", "token", s.Token)
-	halfWindow := time.Duration(*window / 2)
-	result := compareWeeks(s, *itemId, *weeks, halfWindow*time.Second)
 
-	if *command {
-		Log.Debug("print zabbix_sender command template to stdout", "value", result)
-		// ./zabbix_sender -z zabbix -s "Linux DB3" -k db.connections -o 43
-		fmt.Printf("zabbix_sender -z ${SERVER} -s \"${SENDERNAME}\" -k ${ITEMKEY} -o %f", result)
-	} else {
-		Log.Debug("writing difference to stdout", "value", result)
-		// just print the bare value
-		fmt.Printf("%f", result)
-	}
+	query := zabbix.TemplateQuery{}
+	query.Filter.Host = []string{"Template_Java_Process"}
+	zabbix.Template(s, query)
 
+	//	processItems(s, items, *weeks, *window)
 }
+
+/*
+func processItems(session zabbix.Session, items []int64, weeks int, window int64) {
+	halfWindow := time.Duration(window / 2)
+
+	for item := range items {
+
+		itemid = item
+
+		result := compareWeeks(session, *itemId, weeks, halfWindow*time.Second)
+
+		if *command {
+			Log.Debug("print zabbix_sender command template to stdout", "value", result)
+			// ./zabbix_sender -z zabbix -s "Linux DB3" -k db.connections -o 43
+			fmt.Printf("zabbix_sender -z ${SERVER} -s \"${SENDERNAME}\" -k ${ITEMKEY} -o %f", result)
+		} else {
+			Log.Debug("writing difference to stdout", "value", result)
+			// just print the bare value
+			fmt.Printf("%f", result)
+		}
+
+	}
+}
+*/
