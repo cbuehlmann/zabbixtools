@@ -32,7 +32,7 @@ type request struct {
 	Method   string      `json:"method"`  // example: "user.login"
 	Params   interface{} `json:"params"`
 	Id       int         `json:"id"` // request id
-	Auth     string      `json:"auth"`
+	Auth     string      `json:"auth,omitempty"`
 }
 
 type auth struct {
@@ -49,7 +49,7 @@ type apiError struct {
 type loginResponse struct {
 	Encoding string `json:"jsonrpc"` // "2.0"
 	Result   string `json:"result"`
-	Id       string `json:"id"` // referencing request id
+	//Id       string `json:"id,omitempty"` // referencing request id
 	// Error reporting
 	Error apiError `json:"error"`
 }
@@ -64,7 +64,7 @@ type Value struct {
 type queryResponse struct {
 	Encoding string  `json:"jsonrpc"` // "2.0"
 	Items    []Value `json:"result"`
-	Id       string  `json:"id"` // referencing request id
+//	Id       string  `json:"id"` // referencing request id
 }
 
 /**
@@ -133,6 +133,7 @@ func Query(settings Session, query interface{}, api string) ([]Value, error) {
 	result := queryResponse{}
 	err = json.Unmarshal(body, &result)
 	if err != nil {
+		Log.Error("failed to parse json", "error", err)
 		return nil, err
 	}
 
@@ -180,6 +181,9 @@ func Login(settings *Session, user string, password string) error {
 	}
 
 	defer response.Body.Close()
+
+
+	Log.Debug("result from server", "response", string(body[0:min(599, len(body)-1)]))
 
 	result := loginResponse{}
 	err = json.Unmarshal(body, &result)

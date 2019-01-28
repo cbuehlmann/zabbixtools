@@ -15,7 +15,7 @@ var Log = log.New()
 
 func fetch(session zabbix.Session, item int, date time.Time, window time.Duration) []zabbix.Value {
 	query := zabbix.NewHistoryQuery()
-	query.History = 0
+	query.History = 3
 	query.Items = strconv.Itoa(item)
 
 	query.From = date.Add(-window).Unix()
