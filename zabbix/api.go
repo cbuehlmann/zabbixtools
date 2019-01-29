@@ -128,15 +128,28 @@ type TemplateResponseItem struct {
 * Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/item/get
  */
 type ItemQuery struct {
-	History   int    `json:"history"`             // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
-	Output    string `json:"output"`              // extend | count
-	Hosts     string `json:"hostids,omitempty"`   // host ids, numeric
-	Items     string `json:"itemids"`             // item ids, numeric
-	From      int64  `json:"time_from,omitempty"` // timerange start. seconds since epoch
-	To        int64  `json:"time_till,omitempty"` // timerange end. seconds since epoch
-	SortField string `json:"sortfield"`           // clock|value|ns
-	Limit     int    `json:"limit,omitempty"`     // limit number of records
-	SortOrder string `json:"sortorder,omitempty"` // DESC|ASC
+	TemplateIDs            []string    `json:"templateids"` // search for specific template id's
+	Output                 string      `json:"output"`      // extend | count
+	Filter                 interface{} // possible filter
+	Search                 interface{} // possible search criteria
+	SortField              []string
+	SearchWildcardsEnabled bool `json:"searchWildcardsEnabled"`
+
+	session Session
+}
+
+type ItemResponseItem struct {
+	ItemDI     string `json:"itemid"`
+	HostID     string `json:"hostid"`
+	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Key        string `json:"key_"` // Item key
+	Name       string
+	TemplateId string
+}
+
+type itemQueryResponse struct {
+	Encoding string             `json:"jsonrpc"` // "2.0"
+	Elements []ItemResponseItem `json:"result"`  // Elements
 }
 
 func init() {
@@ -171,15 +184,37 @@ func (s *Session) NewTemplateQuery(filter []string, search []string) TemplateQue
 	q := TemplateQuery{Output: "extend", session: *s}
 	q.Filter.Host = filter
 	q.Search.Name = search
-	if len(search) > 0 {
-		q.SearchWildcardsEnabled = true
-	}
+	q.SearchWildcardsEnabled = true
+
 	return q
 }
 
 func (q *TemplateQuery) Query() []TemplateResponseItem {
 	response := templateQueryResponse{}
 	req := Request{session: q.session, request: q, response: &response, method: "template.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (s *Session) NewItemQuery(templateids []string, filter interface{}, search interface{}) ItemQuery {
+	q := ItemQuery{Output: "extend", session: *s}
+	q.TemplateIDs = templateids
+	q.Filter = filter
+	q.Search = search
+	q.SearchWildcardsEnabled = true
+	q.SortField = []string{"hostid"}
+	return q
+}
+
+func (q *ItemQuery) Query() []ItemResponseItem {
+	response := itemQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "item.get"}
 	err := req.query()
 	if err != nil {
 		Log.Error("failed to read templates", "error", err)

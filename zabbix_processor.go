@@ -170,6 +170,8 @@ func main() {
 
 		for _, template := range templates {
 			Log.Info("received template", log.Ctx{"id": template.TemplateId})
+
+			processTemplate(s, template)
 		}
 
 	} else {
@@ -178,6 +180,15 @@ func main() {
 	}
 
 	//	processItems(s, items, *weeks, *window)
+}
+
+func processTemplate(session zabbix.Session, template zabbix.TemplateResponseItem) {
+
+	query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
+	items := query.Query()
+	for _, item := range items {
+		Log.Info("found item", log.Ctx{"host": item.HostID, "itemname": item.Name, "id": item.ItemDI, "key": item.Key})
+	}
 }
 
 /*
