@@ -1,4 +1,4 @@
-package main
+package zabbix
 
 import (
 	"fmt"
@@ -11,7 +11,8 @@ import (
 const CONFIGURATION_EXAMPLE = "conf/example.yaml"
 
 func TestReadConfigurationFromFile(t *testing.T) {
-	configuration := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
+	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
+	assert.Nil(t, err)
 	validateConfiguration(t, configuration)
 }
 

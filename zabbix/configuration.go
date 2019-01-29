@@ -1,7 +1,7 @@
-package main
+package zabbix
 
 import (
-	"fmt"
+	log "github.com/inconshreveable/log15"
 	"gopkg.in/yaml.v2"
 	"os"
 )
@@ -47,7 +47,7 @@ func ReadConfigurationFromFile(filename string) (Configuration, error) {
 	}
 
 	configuration := Configuration{}
-	fmt.Printf("parsing yaml from %s %s\n", file.Name(), string(data))
+	Log.Debug("parsing yaml from", log.Ctx{"filename": file.Name(), "content": string(data)})
 
 	err = yaml.Unmarshal([]byte(data), &configuration)
 	if err != nil {

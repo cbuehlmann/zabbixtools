@@ -14,17 +14,14 @@ import (
 var Log = log.New()
 
 func fetch(session zabbix.Session, item int, date time.Time, window time.Duration) []zabbix.Value {
-	query := zabbix.NewHistoryQuery()
+	query := session.NewHistoryQuery()
 	query.History = 3
 	query.Items = strconv.Itoa(item)
 
 	query.From = date.Add(-window).Unix()
 	query.To = date.Add(+window).Unix()
 
-	values, err := zabbix.History(session, query)
-	if err != nil {
-		return nil
-	}
+	values := query.Query()
 	return values
 }
 
@@ -100,9 +97,9 @@ func main() {
 	Log.SetHandler(log.DiscardHandler())
 
 	// configuration
-	configfile := flag.String("config", "~/.zabbix_processor.yml", "configuration.")
+	configfile := flag.String("file", "~/.zabbix_processor.yml", "configuration file")
 
-	apiUrl := flag.String("url", "http://127.0.0.1/zabbix/api_jsonrpc.php", "ZABBIX frontend/API URL")
+	apiUrl := flag.String("url", "", "ZABBIX frontend/API URL")
 	username := flag.String("username", "", "ZABBIX username")
 	password := flag.String("password", "", "ZABBIX password")
 
@@ -110,25 +107,25 @@ func main() {
 	verbose := flag.Bool("verbose", false, "just print result")
 
 	// algorithm parameters
-	weeks := flag.Int("weeks", 3, "numbers of weeks back")
-	window := flag.Int64("window", 3600, "historic value search window size in seconds. 3600 for 1 hour")
+	//weeks := flag.Int("weeks", 3, "numbers of weeks back")
+	//window := flag.Int64("window", 3600, "historic value search window size in seconds. 3600 for 1 hour")
 
 	// configure output
-	output := flag.String("outpt", "-", "write trapper format")
+	//output := flag.String("outpt", "-", "write trapper format")
 
 	flag.Parse()
 
-	var configuration Configuration
+	var configuration zabbix.Configuration
 
 	if *configfile != "" {
 		var err error
-		configuration, err = ReadConfigurationFromFile(*configfile)
+		configuration, err = zabbix.ReadConfigurationFromFile(*configfile)
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "unable to parse configuration file", *configfile, err)
 			os.Exit(2)
 		}
 	} else {
-		configuration = Configuration{}
+		configuration = zabbix.Configuration{}
 	}
 
 	if *verbose {
@@ -143,6 +140,13 @@ func main() {
 		configuration.Zabbix.Api.Username = *username
 	}
 
+	if *password != "" {
+		if configuration.Zabbix.Api.Password != "" {
+			Log.Debug("password from command line overrides configuration value")
+		}
+		configuration.Zabbix.Api.Username = *password
+	}
+
 	if *apiUrl != "" {
 		if configuration.Zabbix.Api.URL != "" {
 			Log.Debug("api uri from command line overrides configuration value")
@@ -150,18 +154,28 @@ func main() {
 		configuration.Zabbix.Api.URL = *apiUrl
 	}
 
-	s := zabbix.Session{URL: *apiUrl + "/api_jsonrpc.php"}
+	s := zabbix.Session{URL: configuration.Zabbix.Api.URL}
 	Log.Info("authenticating", "server", s.URL)
-	err := zabbix.Login(&s, configuration.Zabbix.Api.Username, *password)
+	err := zabbix.Login(&s, configuration.Zabbix.Api.Username, configuration.Zabbix.Api.Password)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "login failed", err)
 		os.Exit(3)
 	}
 	Log.Info("login successful", "token", s.Token)
 
-	query := zabbix.TemplateQuery{}
-	query.Filter.Host = []string{"Template_Java_Process"}
-	zabbix.Template(s, query)
+	req := s.NewTemplateQuery([]string{"Template OS Linux"}, []string{})
+	templates := req.Query()
+
+	if templates != nil {
+
+		for _, template := range templates {
+			Log.Info("received template", log.Ctx{"id": template.TemplateId})
+		}
+
+	} else {
+		_, _ = fmt.Fprintln(os.Stderr, "failed to read templates")
+		os.Exit(3)
+	}
 
 	//	processItems(s, items, *weeks, *window)
 }

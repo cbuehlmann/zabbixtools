@@ -15,6 +15,7 @@ import (
 )
 
 var Log = logging.New()
+var requestEnumerator = 1
 
 const contentType string = "application/json-rpc"
 
@@ -27,7 +28,7 @@ type Session struct {
 	Token string
 }
 
-type ZabbixRequest struct {
+type Request struct {
 	session  Session
 	method   string
 	request  interface{}
@@ -72,6 +73,7 @@ type Value struct {
 type historyQueryResponse struct {
 	Encoding string  `json:"jsonrpc"` // "2.0"
 	Items    []Value `json:"result"`
+
 	//	Id       string  `json:"id"` // referencing request id
 }
 
@@ -89,7 +91,7 @@ type HistoryQuery struct {
 	Limit     int    `json:"limit,omitempty"`     // limit number of records
 	SortOrder string `json:"sortorder,omitempty"` // DESC|ASC
 
-	response historyQueryResponse
+	session Session
 }
 
 /**
@@ -99,18 +101,27 @@ type TemplateQuery struct {
 	Output string `json:"output"` // extend | count
 	Filter struct {
 		Host []string `json:"host,omitempty"` // template names
-	}
-	result templateQueryResponse
+	} `json:"filter,omitempty"` // filters
+	Search struct {
+		Name []string `json:"name,omitempty"` // template names
+	} `json:"search,omitempty"` // filters
+
+	SearchWildcardsEnabled bool `json:"searchWildcardsEnabled"`
+
+	session Session
 }
 
 type templateQueryResponse struct {
-	Encoding string `json:"jsonrpc"` // "2.0"
-	Result   []TemplateElement
+	Encoding string                 `json:"jsonrpc"` // "2.0"
+	Elements []TemplateResponseItem `json:"result"`  // Elements
+
+	//	Id       string  `json:"id"` // referencing request id
 }
 
-type TemplateElement struct {
+type TemplateResponseItem struct {
 	Host       string
-	TemplateId int64
+	Name       string
+	TemplateId string
 }
 
 /**
@@ -132,29 +143,57 @@ func init() {
 	Log.SetHandler(logging.DiscardHandler())
 }
 
-func newRequest(method string, payload interface{}) request {
-	return request{Encoding: "2.0", Method: method, Params: payload, Id: 1}
-}
-
 func Version() string {
-	return "0.0.2"
+	return "0.0.3"
 }
 
 /**
  * Initialize history query
  */
-func NewHistoryQuery() HistoryQuery {
-	return HistoryQuery{History: 3, SortField: "clock", Output: "extend", SortOrder: "DESC"}
+func (s *Session) NewHistoryQuery() HistoryQuery {
+	q := HistoryQuery{History: 3, SortField: "clock", Output: "extend", SortOrder: "DESC", session: *s}
+	return q
 }
 
-func History(settings Session, query HistoryQuery) ([]Value, error) {
-	return Query(settings, query, "history.get")
+func (q *HistoryQuery) Query() []Value {
+	response := historyQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "history.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read history", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Items)})
+	return response.Items
 }
 
-func ZabbixQuery(query *ZabbixRequest) error {
+func (s *Session) NewTemplateQuery(filter []string, search []string) TemplateQuery {
+	q := TemplateQuery{Output: "extend", session: *s}
+	q.Filter.Host = filter
+	q.Search.Name = search
+	if len(search) > 0 {
+		q.SearchWildcardsEnabled = true
+	}
+	return q
+}
 
+func (q *TemplateQuery) Query() []TemplateResponseItem {
+	response := templateQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "template.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (query *Request) query() error {
 	uri := query.session.URL
-	request := request{Encoding: "2.0", Method: query.method, Params: query.request, Id: 1}
+	request := request{Encoding: "2.0", Method: query.method, Params: query.request, Id: requestEnumerator}
+	requestEnumerator++
 	request.Auth = query.session.Token
 	message, err := json.Marshal(request)
 	if err != nil {
@@ -172,58 +211,20 @@ func ZabbixQuery(query *ZabbixRequest) error {
 	defer response.Body.Close()
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	Log.Debug("result from server", "duration", (end.Nanosecond()-start.Nanosecond())/10000, "response", string(body[0:min(100, len(body)-1)]))
+	Log.Debug("result from server", "duration", (end.Nanosecond()-start.Nanosecond())/10000, "response", string(body[0:min(700, len(body)-1)]))
 
-	result := query.result
-	err = json.Unmarshal(body, &result)
+	err = json.Unmarshal(body, query.response)
 	if err != nil {
 		Log.Error("failed to parse json", "error", err)
-		return nil, err
+		return err
 	}
 
-	Log.Debug("hits from server", "number", len(result.Items))
+	Log.Debug("received", "result", query.response)
 
-	return result.Items, nil
-}
-
-func Query(settings Session, query interface{}, api string) ([]Value, error) {
-	uri := settings.URL
-	request := newRequest(api, query)
-	request.Auth = settings.Token
-	message, err := json.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
-	Log.Debug("zabbix api call", "url", uri, "json", string(message))
-	start := time.Now()
-	response, err := settings.Connection.Post(settings.URL, contentType, bytes.NewReader(message))
-	end := time.Now()
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := ioutil.ReadAll(response.Body)
-	defer response.Body.Close()
-
-	if err != nil {
-		return nil, err
-	}
-
-	Log.Debug("result from server", "duration", (end.Nanosecond()-start.Nanosecond())/10000, "response", string(body[0:min(100, len(body)-1)]))
-
-	result := query.result
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		Log.Error("failed to parse json", "error", err)
-		return nil, err
-	}
-
-	Log.Debug("hits from server", "number", len(result.Items))
-
-	return result.Items, nil
+	return nil
 }
 
 /**
@@ -244,7 +245,8 @@ func Query(settings Session, query interface{}, api string) ([]Value, error) {
 func Login(settings *Session, user string, password string) error {
 	//
 	uri := settings.URL
-	auth := newRequest("user.login", auth{User: user, Password: password})
+	auth := request{Encoding: "2.0", Method: "user.login", Params: auth{User: user, Password: password}, Id: requestEnumerator}
+	requestEnumerator++
 	message, err := json.Marshal(auth)
 	if err != nil {
 		return err
@@ -266,7 +268,7 @@ func Login(settings *Session, user string, password string) error {
 
 	defer response.Body.Close()
 
-	Log.Debug("result from server", "response", string(body[0:min(599, len(body)-1)]))
+	Log.Debug("received response from server", "response", string(body[0:min(700, len(body)-1)]))
 
 	result := loginResponse{}
 	err = json.Unmarshal(body, &result)
@@ -274,7 +276,7 @@ func Login(settings *Session, user string, password string) error {
 		return err
 	}
 
-	Log.Debug("received token", "json", string(body), "token", result.Result)
+	Log.Debug("received token", "token", result.Result)
 	if len(result.Result) < 5 || result.Error.Code != 0 {
 		return fmt.Errorf("failed to authenticate: %#v", result.Error)
 	}
