@@ -94,7 +94,6 @@ func average(values []float64) float64 {
 }
 
 func main() {
-	Log.SetHandler(log.DiscardHandler())
 
 	// configuration
 	configfile := flag.String("file", "~/.zabbix_processor.yml", "configuration file")
@@ -129,8 +128,13 @@ func main() {
 	}
 
 	if *verbose {
+		// without filter
 		Log.SetHandler(log.StdoutHandler)
 		zabbix.Log.SetHandler(log.StdoutHandler)
+	} else {
+		filter := log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler)
+		Log.SetHandler(filter)
+		zabbix.Log.SetHandler(filter)
 	}
 
 	if *username != "" {
@@ -163,31 +167,54 @@ func main() {
 	}
 	Log.Info("login successful", "token", s.Token)
 
-	req := s.NewTemplateQuery([]string{"Template OS Linux"}, []string{})
-	templates := req.Query()
+	for index, templateConfiguration := range configuration.Templates {
 
-	if templates != nil {
+		Log.Debug("filtering templates with", "filter", templateConfiguration, "index", index)
 
-		for _, template := range templates {
-			Log.Info("received template", log.Ctx{"id": template.TemplateId})
+		req := s.NewTemplateQuery(templateConfiguration.Filter, templateConfiguration.Search)
+		templates := req.Query()
 
-			processTemplate(s, template)
+		Log.Info("processing matching templates", "templates", templates)
+
+		if templates != nil {
+
+			for _, template := range templates {
+				Log.Info("processing template", log.Ctx{"id": template.TemplateId, "name": template.Name})
+				processTemplate(s, template, templateConfiguration)
+			}
+
+		} else {
+			_, _ = fmt.Fprintln(os.Stderr, "failed to read templates")
+			os.Exit(3)
 		}
-
-	} else {
-		_, _ = fmt.Fprintln(os.Stderr, "failed to read templates")
-		os.Exit(3)
 	}
 
 	//	processItems(s, items, *weeks, *window)
 }
 
-func processTemplate(session zabbix.Session, template zabbix.TemplateResponseItem) {
+func processTemplate(session zabbix.Session, template zabbix.TemplateResponseItem, templateConfiguration zabbix.TemplateFilterConfiguration) {
 
-	query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
+	if len(templateConfiguration.Items) > 0 {
+		for _, itemFilter := range templateConfiguration.Items {
+			query := session.NewItemQuery([]string{template.TemplateId}, itemFilter.Filter, itemFilter.Search)
+			processItems(query, template)
+		}
+	} else {
+		// no item filters, process all items!
+		Log.Debug("no item filter criteria for template", "template", template.Name)
+		query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
+		processItems(query, template)
+	}
+}
+
+func processItems(query zabbix.ItemQuery, template zabbix.TemplateResponseItem) {
 	items := query.Query()
-	for _, item := range items {
-		Log.Info("found item", log.Ctx{"host": item.HostID, "itemname": item.Name, "id": item.ItemDI, "key": item.Key})
+	if len(items) > 0 {
+		for _, item := range items {
+			Log.Info("found item", "itemid", item.ItemDI, "key", item.Key, "data", item)
+		}
+	} else {
+		Log.Warn("no items found on template", "template", template.Name)
 	}
 }
 

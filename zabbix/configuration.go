@@ -20,19 +20,23 @@ type Configuration struct {
 		}
 	}
 
-	ItemFilter []struct {
-		ItemFilter struct {
-			TemplateName    string `yaml:"template-name"`
-			ItemFilter      string `yaml:"item-name"`
-			ItemFilterRegex string `yaml:"item-key-regex"`
-		}
-	} `yaml:"filter"`
+	Templates []TemplateFilterConfiguration
 
-	Algorithm interface{} `yaml:"algo"`
+	Algorithm interface{}
+}
+
+type TemplateFilterConfiguration struct {
+	Filter map[string][]string
+	Search map[string][]string
+
+	// Filter items on templates
+	Items []struct {
+		Filter map[string][]string
+		Search map[string][]string
+	}
 }
 
 func ReadConfigurationFromFile(filename string) (Configuration, error) {
-
 	file, err := os.Open(filename)
 	if err != nil {
 		return Configuration{}, err
@@ -53,6 +57,8 @@ func ReadConfigurationFromFile(filename string) (Configuration, error) {
 	if err != nil {
 		return configuration, err
 	}
+
+	Log.Debug("parsed yaml", log.Ctx{"structure": configuration})
 
 	return configuration, nil
 }

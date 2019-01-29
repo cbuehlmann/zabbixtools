@@ -12,15 +12,27 @@ zabbix:
     port: 10051
 
 
-filter:
-  - template-name: Template_Java_Process
-    item-key-regex: "$JMX[java.lang.*"
+templates:
+  - Process Template:
+    filter:
+      name:
+        - Template OS Linux
+    items:
+      - System CPU:
+        search:
+          key:
+            - "system.cpu*"
 
-  - template-name: Template_Verkaufsapplikation
-    item-name: Antwortzeit Wartungsinterface
-    item-key: net.tcp.service.perf["http",,"8080"]
+  - id: 'Contains HTTP 8080'
+    filter:
+      key_:
+        - net.tcp.service.perf["http",,"8080"]
+    items:
+      - HTTP808:
+        search:
+          key_:
+            - net.tcp.service.perf["http",,"8080"]
 
-
-algo:
+algorithm:
   weeks: 3
   window: 600 # seconds => 10 min

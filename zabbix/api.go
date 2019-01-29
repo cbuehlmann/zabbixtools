@@ -98,15 +98,10 @@ type HistoryQuery struct {
 * Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/template/get
  */
 type TemplateQuery struct {
-	Output string `json:"output"` // extend | count
-	Filter struct {
-		Host []string `json:"host,omitempty"` // template names
-	} `json:"filter,omitempty"` // filters
-	Search struct {
-		Name []string `json:"name,omitempty"` // template names
-	} `json:"search,omitempty"` // filters
-
-	SearchWildcardsEnabled bool `json:"searchWildcardsEnabled"`
+	Output                 string              `json:"output"` // extend | count
+	Filter                 map[string][]string `json:"filter",omitempty`
+	Search                 map[string][]string `json:"search",omitempty`
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
 
 	session Session
 }
@@ -114,7 +109,6 @@ type TemplateQuery struct {
 type templateQueryResponse struct {
 	Encoding string                 `json:"jsonrpc"` // "2.0"
 	Elements []TemplateResponseItem `json:"result"`  // Elements
-
 	//	Id       string  `json:"id"` // referencing request id
 }
 
@@ -128,10 +122,10 @@ type TemplateResponseItem struct {
 * Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/item/get
  */
 type ItemQuery struct {
-	TemplateIDs            []string    `json:"templateids"` // search for specific template id's
-	Output                 string      `json:"output"`      // extend | count
-	Filter                 interface{} // possible filter
-	Search                 interface{} // possible search criteria
+	TemplateIDs            []string            `json:"templateids"`      // search for specific template id's
+	Output                 string              `json:"output"`           // extend | count
+	Filter                 map[string][]string `json:"filter",omitempty` // possible filter
+	Search                 map[string][]string `json:"search",omitempty` // possible search criteria
 	SortField              []string
 	SearchWildcardsEnabled bool `json:"searchWildcardsEnabled"`
 
@@ -143,13 +137,14 @@ type ItemResponseItem struct {
 	HostID     string `json:"hostid"`
 	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
 	Key        string `json:"key_"` // Item key
+	Delay      string // sample interval in seconds
 	Name       string
 	TemplateId string
 }
 
 type itemQueryResponse struct {
 	Encoding string             `json:"jsonrpc"` // "2.0"
-	Elements []ItemResponseItem `json:"result"`  // Elements
+	Elements []ItemResponseItem `json:"result"`  // items
 }
 
 func init() {
@@ -180,12 +175,13 @@ func (q *HistoryQuery) Query() []Value {
 	return response.Items
 }
 
-func (s *Session) NewTemplateQuery(filter []string, search []string) TemplateQuery {
+func (s *Session) NewTemplateQuery(filter map[string][]string, search map[string][]string) TemplateQuery {
 	q := TemplateQuery{Output: "extend", session: *s}
-	q.Filter.Host = filter
-	q.Search.Name = search
-	q.SearchWildcardsEnabled = true
-
+	q.Filter = filter
+	q.Search = search
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
 	return q
 }
 
@@ -202,12 +198,14 @@ func (q *TemplateQuery) Query() []TemplateResponseItem {
 	return response.Elements
 }
 
-func (s *Session) NewItemQuery(templateids []string, filter interface{}, search interface{}) ItemQuery {
+func (s *Session) NewItemQuery(templateids []string, filter map[string][]string, search map[string][]string) ItemQuery {
 	q := ItemQuery{Output: "extend", session: *s}
 	q.TemplateIDs = templateids
 	q.Filter = filter
 	q.Search = search
-	q.SearchWildcardsEnabled = true
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
 	q.SortField = []string{"hostid"}
 	return q
 }

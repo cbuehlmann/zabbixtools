@@ -1,7 +1,10 @@
 package zabbix
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/cbuehlmann/zabbix_processor/zabbix"
+	"github.com/inconshreveable/log15"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
 	"os"
@@ -14,6 +17,37 @@ func TestReadConfigurationFromFile(t *testing.T) {
 	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
 	assert.Nil(t, err)
 	validateConfiguration(t, configuration)
+}
+
+func TestFilter(t *testing.T) {
+	zabbix.Log.SetHandler(log15.StdoutHandler)
+	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
+	assert.Nil(t, err)
+	assert.NotNil(t, configuration.Templates)
+	assert.Equal(t, 2, len(configuration.Templates))
+	fmt.Fprintf(os.Stdout, "template 0 %v\n", configuration.Templates[0])
+	fmt.Fprintf(os.Stdout, "template 1 %v\n", configuration.Templates[1])
+}
+
+func TestFilterToJson(t *testing.T) {
+	zabbix.Log.SetHandler(log15.StdoutHandler)
+	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
+	assert.Nil(t, err)
+	assert.NotNil(t, configuration.Templates)
+	assert.Equal(t, 2, len(configuration.Templates))
+	fmt.Fprintf(os.Stdout, "template 0: %v\n", configuration.Templates[0])
+	fmt.Fprintf(os.Stdout, "template 1: %v\n", configuration.Templates[1])
+
+	jsonString, err := json.Marshal(configuration.Templates[0])
+	assert.Nil(t, err)
+	fmt.Fprintf(os.Stdout, "template 0 to json: %s\n", jsonString)
+
+	jsonString, err = json.Marshal(configuration.Templates[1])
+	assert.Nil(t, err)
+	fmt.Fprintf(os.Stdout, "template 1 to json: %s\n", jsonString)
+
+	assert.Equal(t, 1, len(configuration.Templates[1].Items))
+	fmt.Fprintf(os.Stdout, "template 1 item filter: %v\n", configuration.Templates[1].Items[0])
 }
 
 func TestExampleConfiguration(t *testing.T) {
