@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const CONFIGURATION_EXAMPLE = "conf/example.yaml"
+const CONFIGURATION_EXAMPLE = "../conf/example.yaml"
 
 func TestReadConfigurationFromFile(t *testing.T) {
 	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
@@ -38,6 +38,8 @@ func TestExampleConfiguration(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+
+	fmt.Printf("parsed Configuration structure %v\n", configuration)
 
 	validateConfiguration(t, configuration)
 }
