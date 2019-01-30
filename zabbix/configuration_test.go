@@ -45,8 +45,8 @@ func TestFilterToJson(t *testing.T) {
 	assert.Nil(t, err)
 	fmt.Fprintf(os.Stdout, "template 1 to json: %s\n", jsonString)
 
-	assert.Equal(t, 1, len(configuration.Templates[1].Items))
-	fmt.Fprintf(os.Stdout, "template 1 item filter: %v\n", configuration.Templates[1].Items[0])
+	assert.Equal(t, 2, len(configuration.Items))
+	fmt.Fprintf(os.Stdout, "template 1 item filter: %v\n", configuration.Items[0])
 }
 
 func TestExampleConfiguration(t *testing.T) {
@@ -82,8 +82,8 @@ func validateConfiguration(t *testing.T, configuration Configuration) {
 	assert.NotNil(t, configuration.Zabbix.Api)
 
 	assert.Equal(t, "http://127.0.0.1/zabbix/api_jsonrpc.php", configuration.Zabbix.Api.URL)
-	assert.Equal(t, "api-user", configuration.Zabbix.Api.Username)
-	assert.Equal(t, "zabbix", configuration.Zabbix.Api.Password)
+	assert.Equal(t, "zabbixapi-user", configuration.Zabbix.Api.Username)
+	assert.Equal(t, "zabbixapi-pw", configuration.Zabbix.Api.Password)
 
 	assert.Equal(t, "127.0.0.1", configuration.Zabbix.Trapper.Host)
 	assert.Equal(t, 10051, configuration.Zabbix.Trapper.Port)

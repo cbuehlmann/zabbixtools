@@ -19,18 +19,20 @@ type Configuration struct {
 			Port int
 		}
 	}
-	Templates []TemplateFilterConfiguration
+
+	// Find hosts via template
+	Templates []TemplateFilterConfiguration `yaml:"templates"`
+
+	// Find hosts
+	Hosts []HostFilterConfiguration `yaml:"hosts"`
+
+	// Filter items on found hosts
+	Items []ItemConfiguration `yaml:"items"`
 }
 
 type TemplateFilterConfiguration struct {
 	Filter map[string][]string
 	Search map[string][]string
-
-	// Filter hosts
-	Hosts HostFilterConfiguration
-
-	// Filter items on templates
-	Items []ItemConfiguration
 }
 
 type HostFilterConfiguration struct {

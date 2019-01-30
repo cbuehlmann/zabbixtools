@@ -11,8 +11,24 @@ import (
 	"time"
 )
 
+/**
+ * Concept:
+ *  1 Find Host ID's
+ *  1a filter by Template
+ *  1b filter by Host-Filter
+ *  2 Find Items (filter by Host ID's)
+ *  3 Process items -> store processing value
+ * [4] push data back to server
+ */
+
 var Log = log.New()
 var destination = os.Stdout
+
+// Host ID to Host Name
+var hosts map[string]string
+
+// Template ID to Template Name
+var templates map[string]string
 
 func fetch(session zabbix.Session, item string, date time.Time, window time.Duration) []zabbix.Value {
 	query := session.NewHistoryQuery()
@@ -175,31 +191,55 @@ func main() {
 	}
 	Log.Info("login successful", "token", s.Token)
 
+}
+
+/**
+ * Find matching Hosts by template filter
+ */
+func processTemplate(session zabbix.Session, configuration zabbix.Configuration) {
+
 	for index, templateConfiguration := range configuration.Templates {
+		Log.Debug("filtering templateHits with", "filter", templateConfiguration, "index", index)
 
-		Log.Debug("filtering templates with", "filter", templateConfiguration, "index", index)
+		req := session.NewTemplateQuery(templateConfiguration.Filter, templateConfiguration.Search)
+		templateHits := req.Query()
 
-		req := s.NewTemplateQuery(templateConfiguration.Filter, templateConfiguration.Search)
-		templates := req.Query()
+		Log.Info("processing matching templateHits", "templateHits", templateHits)
 
-		Log.Info("processing matching templates", "templates", templates)
+		if templateHits != nil {
 
-		if templates != nil {
-
-			for _, template := range templates {
-				Log.Info("processing template", log.Ctx{"id": template.TemplateId, "name": template.Name})
-				processTemplate(s, template, templateConfiguration)
+			for _, template := range templateHits {
+				Log.Info("adding template", log.Ctx{"id": template.TemplateId, "name": template.Name})
+				templates[template.TemplateId] = template.Name
 			}
 
 		} else {
-			_, _ = fmt.Fprintln(os.Stderr, "failed to read templates")
+			_, _ = fmt.Fprintln(os.Stderr, "failed to read templateHits")
 			os.Exit(3)
 		}
 	}
 }
 
-func processTemplate(session zabbix.Session, template zabbix.TemplateResponseItem, templateConfiguration zabbix.TemplateFilterConfiguration) {
+func findHosts(session zabbix.Session, configuration zabbix.Configuration) {
 
+	if len(templates) > 0 {
+		keys := make([]string, len(templates))
+		for key := range templates {
+			keys = append(keys, key)
+		}
+		hostQuery := session.NewHostQuery(keys, []string{}, templateConfiguration.Hosts.Search)
+	}
+	hostQuery := session.NewHostQuery([]string{template.TemplateId}, templateConfiguration.Hosts.Filter, templateConfiguration.Hosts.Search)
+
+	for index, hostConfiguration := range configuration.Hosts {
+
+		hostQuery := session.NewHostQuery([]string{template.TemplateId}, templateConfiguration.Hosts.Filter, templateConfiguration.Hosts.Search)
+		hosts := hostQuery.Query()
+
+	}
+}
+
+func filterItems() {
 	if len(templateConfiguration.Items) > 0 {
 		for _, itemFilter := range templateConfiguration.Items {
 			query := session.NewItemQuery([]string{template.TemplateId}, itemFilter.Filter, itemFilter.Search)
@@ -221,6 +261,7 @@ func processTemplate(session zabbix.Session, template zabbix.TemplateResponseIte
 		//query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
 		//processItems(session, query, template, itemFilter)
 	}
+
 }
 
 func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, hosts []zabbix.HostResponseElement, template zabbix.TemplateResponseItem, itemConfiguration zabbix.ItemConfiguration) {
