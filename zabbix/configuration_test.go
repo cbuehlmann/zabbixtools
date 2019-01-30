@@ -3,7 +3,6 @@ package zabbix
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/cbuehlmann/zabbix_processor/zabbix"
 	"github.com/inconshreveable/log15"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v2"
@@ -20,7 +19,7 @@ func TestReadConfigurationFromFile(t *testing.T) {
 }
 
 func TestFilter(t *testing.T) {
-	zabbix.Log.SetHandler(log15.StdoutHandler)
+	Log.SetHandler(log15.StdoutHandler)
 	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
 	assert.Nil(t, err)
 	assert.NotNil(t, configuration.Templates)
@@ -30,7 +29,7 @@ func TestFilter(t *testing.T) {
 }
 
 func TestFilterToJson(t *testing.T) {
-	zabbix.Log.SetHandler(log15.StdoutHandler)
+	Log.SetHandler(log15.StdoutHandler)
 	configuration, err := ReadConfigurationFromFile(CONFIGURATION_EXAMPLE)
 	assert.Nil(t, err)
 	assert.NotNil(t, configuration.Templates)

@@ -132,8 +132,8 @@ type ItemQuery struct {
 	session Session
 }
 
-type ItemResponseItem struct {
-	ItemDI     string `json:"itemid"`
+type ItemResponseElement struct {
+	ItemID     string `json:"itemid"`
 	HostID     string `json:"hostid"`
 	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
 	Key        string `json:"key_"` // Item key
@@ -143,8 +143,40 @@ type ItemResponseItem struct {
 }
 
 type itemQueryResponse struct {
-	Encoding string             `json:"jsonrpc"` // "2.0"
-	Elements []ItemResponseItem `json:"result"`  // items
+	Encoding string                `json:"jsonrpc"` // "2.0"
+	Elements []ItemResponseElement `json:"result"`  // items
+}
+
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/host/get
+ */
+type HostQuery struct {
+	TemplateIDs            []string            `json:"templateids",omitempty` // search for specific template id's
+	Output                 string              `json:"output"`                // extend | count
+	Filter                 map[string][]string `json:"filter",omitempty`
+	Search                 map[string][]string `json:"search",omitempty`
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
+	SortField              []string
+
+	IncludeTemplates bool `json:"templated_hosts"` // Return both hosts and templates.
+
+	session Session
+}
+
+type hostQueryResponse struct {
+	Encoding string                `json:"jsonrpc"` // "2.0"
+	Elements []HostResponseElement `json:"result"`  // elements
+	//	Id       string  `json:"id"` // referencing request id
+}
+
+type HostResponseElement struct {
+	Host       string
+	HostID     string `json:"hostid"`
+	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Key        string `json:"key_"` // Item key
+	Delay      string // sample interval in seconds
+	Name       string
+	TemplateId string
 }
 
 func init() {
@@ -210,9 +242,34 @@ func (s *Session) NewItemQuery(templateids []string, filter map[string][]string,
 	return q
 }
 
-func (q *ItemQuery) Query() []ItemResponseItem {
+func (q *ItemQuery) Query() []ItemResponseElement {
 	response := itemQueryResponse{}
 	req := Request{session: q.session, request: q, response: &response, method: "item.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (s *Session) NewHostQuery(templateids []string, filter map[string][]string, search map[string][]string) HostQuery {
+	q := HostQuery{Output: "extend", session: *s}
+	q.TemplateIDs = templateids
+	q.Filter = filter
+	q.Search = search
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
+	q.SortField = []string{"hostid"}
+	return q
+}
+
+func (q *HostQuery) Query() []HostResponseElement {
+	response := hostQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "host.get"}
 	err := req.query()
 	if err != nil {
 		Log.Error("failed to read templates", "error", err)

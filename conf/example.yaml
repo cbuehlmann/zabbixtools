@@ -17,11 +17,21 @@ templates:
     filter:
       name:
         - Template OS Linux
+
+    hosts:  # omit to process all hosts
+      search:
+        host:
+          - "*"
+
     items:
       - System CPU:
         search:
           key:
             - "system.cpu*"
+        pastweeks:  # currently only past n weeks
+          weeks: 3
+          window: 600 # seconds => 10 min
+          postfix: .threeweeksdelta
 
   - id: 'Contains HTTP 8080'
     filter:
@@ -32,7 +42,7 @@ templates:
         search:
           key_:
             - net.tcp.service.perf["http",,"8080"]
-
-algorithm:
-  weeks: 3
-  window: 600 # seconds => 10 min
+        pastweeks:  # currently only past n weeks
+          weeks: 3
+          window: 600 # seconds => 10 min
+          Postfix: .threeweeksdelta

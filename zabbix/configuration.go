@@ -19,21 +19,35 @@ type Configuration struct {
 			Port int
 		}
 	}
-
 	Templates []TemplateFilterConfiguration
-
-	Algorithm interface{}
 }
 
 type TemplateFilterConfiguration struct {
 	Filter map[string][]string
 	Search map[string][]string
 
+	// Filter hosts
+	Hosts HostFilterConfiguration
+
 	// Filter items on templates
-	Items []struct {
-		Filter map[string][]string
-		Search map[string][]string
-	}
+	Items []ItemConfiguration
+}
+
+type HostFilterConfiguration struct {
+	Filter map[string][]string
+	Search map[string][]string
+}
+
+type ItemConfiguration struct {
+	Filter    map[string][]string
+	Search    map[string][]string
+	PastWeeks PastWeeksAlgorithmConfiguration
+	Postfix   string
+}
+
+type PastWeeksAlgorithmConfiguration struct {
+	Weeks  int
+	Window int64
 }
 
 func ReadConfigurationFromFile(filename string) (Configuration, error) {

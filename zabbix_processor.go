@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	zabbix "github.com/cbuehlmann/zabbixtools/zabbix"
+	"github.com/cbuehlmann/zabbixtools/zabbix"
 	log "github.com/inconshreveable/log15"
 	"math"
 	"os"
@@ -12,11 +12,12 @@ import (
 )
 
 var Log = log.New()
+var destination = os.Stdout
 
-func fetch(session zabbix.Session, item int, date time.Time, window time.Duration) []zabbix.Value {
+func fetch(session zabbix.Session, item string, date time.Time, window time.Duration) []zabbix.Value {
 	query := session.NewHistoryQuery()
 	query.History = 3
-	query.Items = strconv.Itoa(item)
+	query.Items = item
 
 	query.From = date.Add(-window).Unix()
 	query.To = date.Add(+window).Unix()
@@ -44,7 +45,7 @@ func getClosestValue(timepoint time.Time, values []zabbix.Value) zabbix.Value {
 /**
  * Fetch n weeks back.
  */
-func compareWeeks(session zabbix.Session, item int, weeks int, window time.Duration) float64 {
+func compareWeeks(session zabbix.Session, item string, weeks int, window time.Duration) (float64, time.Time) {
 
 	now := time.Now()
 	// now fetch latest value
@@ -56,10 +57,12 @@ func compareWeeks(session zabbix.Session, item int, weeks int, window time.Durat
 		os.Exit(10)
 	}
 	current, _ := strconv.ParseFloat(values[0].Value, 64)
-	Log.Info("current value", "value", current, "exact timepoint", time.Unix(values[0].Clock, values[0].Nano).Format("Mon 01-02 15:04:05"))
+	// Sample timepoint
+	timestamp := time.Unix(values[0].Clock, values[0].Nano)
+	Log.Info("current value", "value", current, "exact timepoint", timestamp.Format("Mon 01-02 15:04:05"))
 
 	historicValues := make([]float64, weeks)
-	tp := now
+	tp := timestamp
 	oneWeek := time.Hour * 24 * 7
 	for i := 0; i < weeks; i++ {
 		tp = tp.Add(-oneWeek) // step one week back
@@ -77,7 +80,7 @@ func compareWeeks(session zabbix.Session, item int, weeks int, window time.Durat
 	historic := average(historicValues)
 	Log.Info("calculation done", log.Ctx{"average": historic, "current": current, "difference": current - historic})
 
-	return current - historic
+	return current - historic, timestamp
 
 }
 
@@ -94,23 +97,19 @@ func average(values []float64) float64 {
 }
 
 func main() {
+	var err error
 
 	// configuration
-	configfile := flag.String("file", "~/.zabbix_processor.yml", "configuration file")
+	configfile := flag.String("config", "~/.zabbix_processor.yml", "configuration file")
 
 	apiUrl := flag.String("url", "", "ZABBIX frontend/API URL")
 	username := flag.String("username", "", "ZABBIX username")
 	password := flag.String("password", "", "ZABBIX password")
 
 	// operation
-	verbose := flag.Bool("verbose", false, "just print result")
-
-	// algorithm parameters
-	//weeks := flag.Int("weeks", 3, "numbers of weeks back")
-	//window := flag.Int64("window", 3600, "historic value search window size in seconds. 3600 for 1 hour")
-
-	// configure output
-	//output := flag.String("outpt", "-", "write trapper format")
+	verbose := flag.Bool("verbose", false, "be verbose (log level debug)")
+	quiet := flag.Bool("quiet", false, "just print result. overrides -verbose")
+	output := flag.String("output", "-", "destination for processed values")
 
 	flag.Parse()
 
@@ -127,15 +126,17 @@ func main() {
 		configuration = zabbix.Configuration{}
 	}
 
-	if *verbose {
-		// without filter
-		Log.SetHandler(log.StdoutHandler)
-		zabbix.Log.SetHandler(log.StdoutHandler)
-	} else {
-		filter := log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler)
-		Log.SetHandler(filter)
-		zabbix.Log.SetHandler(filter)
+	handler := log.StdoutHandler
+	if *verbose == false {
+		handler = log.LvlFilterHandler(log.LvlInfo, log.StdoutHandler)
 	}
+	if *quiet {
+		handler = log.DiscardHandler()
+	}
+
+	// without filter
+	Log.SetHandler(handler)
+	zabbix.Log.SetHandler(handler)
 
 	if *username != "" {
 		if configuration.Zabbix.Api.Username != "" {
@@ -158,9 +159,16 @@ func main() {
 		configuration.Zabbix.Api.URL = *apiUrl
 	}
 
+	if *output != "-" {
+		destination, err = os.OpenFile(*output, os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "cannot write file ", *output, err.Error())
+		}
+	}
+
 	s := zabbix.Session{URL: configuration.Zabbix.Api.URL}
 	Log.Info("authenticating", "server", s.URL)
-	err := zabbix.Login(&s, configuration.Zabbix.Api.Username, configuration.Zabbix.Api.Password)
+	err = zabbix.Login(&s, configuration.Zabbix.Api.Username, configuration.Zabbix.Api.Password)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "login failed", err)
 		os.Exit(3)
@@ -188,8 +196,6 @@ func main() {
 			os.Exit(3)
 		}
 	}
-
-	//	processItems(s, items, *weeks, *window)
 }
 
 func processTemplate(session zabbix.Session, template zabbix.TemplateResponseItem, templateConfiguration zabbix.TemplateFilterConfiguration) {
@@ -197,47 +203,42 @@ func processTemplate(session zabbix.Session, template zabbix.TemplateResponseIte
 	if len(templateConfiguration.Items) > 0 {
 		for _, itemFilter := range templateConfiguration.Items {
 			query := session.NewItemQuery([]string{template.TemplateId}, itemFilter.Filter, itemFilter.Search)
-			processItems(query, template)
+			items := query.Query()
+
+			if len(items) > 0 {
+				// find all active hosts
+				hostQuery := session.NewHostQuery([]string{template.TemplateId}, templateConfiguration.Hosts.Filter, templateConfiguration.Hosts.Search)
+				hosts := hostQuery.Query()
+
+				processItems(session, items, hosts, template, itemFilter)
+			} else {
+				Log.Warn("no items found on template", "template", template.Name)
+			}
 		}
 	} else {
 		// no item filters, process all items!
-		Log.Debug("no item filter criteria for template", "template", template.Name)
-		query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
-		processItems(query, template)
+		Log.Warn("no item filter criteria for template", "template", template.Name)
+		//query := session.NewItemQuery([]string{template.TemplateId}, nil, nil)
+		//processItems(session, query, template, itemFilter)
 	}
 }
 
-func processItems(query zabbix.ItemQuery, template zabbix.TemplateResponseItem) {
-	items := query.Query()
-	if len(items) > 0 {
-		for _, item := range items {
-			Log.Info("found item", "itemid", item.ItemDI, "key", item.Key, "data", item)
+func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, hosts []zabbix.HostResponseElement, template zabbix.TemplateResponseItem, itemConfiguration zabbix.ItemConfiguration) {
+	for _, item := range items {
+		Log.Info("found item", "itemid", item.ItemID, "key", item.Key, "data", item)
+		if itemConfiguration.PastWeeks.Weeks > 0 {
+
+			halfWindow := time.Duration(itemConfiguration.PastWeeks.Window / 2)
+			value, timestamp := compareWeeks(session, item.ItemID, itemConfiguration.PastWeeks.Weeks, halfWindow*time.Second)
+
+			addSenderLine(item.HostID, item.Key+itemConfiguration.Postfix, timestamp, value)
+
 		}
-	} else {
-		Log.Warn("no items found on template", "template", template.Name)
 	}
 }
 
-/*
-func processItems(session zabbix.Session, items []int64, weeks int, window int64) {
-	halfWindow := time.Duration(window / 2)
-
-	for item := range items {
-
-		itemid = item
-
-		result := compareWeeks(session, *itemId, weeks, halfWindow*time.Second)
-
-		if *command {
-			Log.Debug("print zabbix_sender command template to stdout", "value", result)
-			// ./zabbix_sender -z zabbix -s "Linux DB3" -k db.connections -o 43
-			fmt.Printf("zabbix_sender -z ${SERVER} -s \"${SENDERNAME}\" -k ${ITEMKEY} -o %f", result)
-		} else {
-			Log.Debug("writing difference to stdout", "value", result)
-			// just print the bare value
-			fmt.Printf("%f", result)
-		}
-
-	}
+func addSenderLine(hostname string, itemkey string, timestamp time.Time, value float64) {
+	line := fmt.Sprintf("\"%s\" %s %d %f", hostname, itemkey, timestamp.Unix(), value)
+	Log.Info("appending zabbix_sender line", "line", line)
+	destination.WriteString(line)
 }
-*/
