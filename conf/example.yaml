@@ -7,9 +7,10 @@ zabbix:
     URL: http://127.0.0.1/zabbix/api_jsonrpc.php    # url of the zabbix web api
     username: zabbixapiuser
     password: zabbixapipw
-  trapper:
+  sender:
     host: 127.0.0.1
     port: 10051
+
 
 # 1a discover hosts by template
 templates:
@@ -39,7 +40,7 @@ items:
     pastweeks:  # currently only past n weeks
       weeks: 3
       window: 600 # seconds => 10 min
-    postfix: .delta3w
+    postfix: .3wd
 
   - HTTP8080:
     filter:
@@ -48,4 +49,4 @@ items:
     pastweeks:  # currently only past n weeks
       weeks: 7
       window: 600 # seconds => 10 min
-    postfix: .delta7w
+    postfix: .7wd

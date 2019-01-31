@@ -1,6 +1,6 @@
 # ZABBIX history processing example
 
-[![Build Status](https://travis-ci.org/cbuehlmann/redirect.svg?branch=master)](https://travis-ci.org/cbuehlmann/redirect)
+[![Build Status](https://travis-ci.org/cbuehlmann/zabbixtools.svg?branch=master)](https://travis-ci.org/cbuehlmann/zabbixtools)
 
 Calculates the difference between the last value of an item and the average value for the same element over the past n weeks at the same weekday and hour.
 

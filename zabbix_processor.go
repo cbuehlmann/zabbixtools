@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"github.com/cbuehlmann/zabbixtools/zabbix"
 	log "github.com/inconshreveable/log15"
 	"math"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -23,6 +26,7 @@ import (
 
 var Log = log.New()
 var destination = os.Stdout
+var lines = 0
 
 // Template ID to Template Name
 var templates map[string]string = make(map[string]string, 0)
@@ -45,6 +49,8 @@ func main() {
 	verbose := flag.Bool("verbose", false, "be verbose (log level debug)")
 	quiet := flag.Bool("quiet", false, "just print result. overrides -verbose")
 	output := flag.String("output", "-", "destination for processed values")
+
+	nop := flag.Bool("nop", false, "do not publish values, even when zabbix_sender is configured")
 
 	flag.Parse()
 
@@ -120,7 +126,48 @@ func main() {
 
 	findItems(session, configuration)
 
-	destination.Close()
+	// flush zabbix to disk
+	if os.Stdout != destination {
+		destination.Close()
+	}
+
+	if *output != "-" && *nop == false && len(configuration.Zabbix.Sender.Host) > 0 {
+		exitCode := sendItemData(configuration, *output, *verbose)
+		os.Exit(exitCode)
+	}
+}
+
+func sendItemData(configuration zabbix.Configuration, filename string, verbose bool) int {
+	Log.Info("publishing data to ZABBIX server", "host", configuration.Zabbix.Sender.Host)
+	senderPath := configuration.Zabbix.Sender.Binary
+	if len(senderPath) < 1 {
+		senderPath = "zabbix_sender"
+	}
+	commandline := []string{"--zabbix-server", configuration.Zabbix.Sender.Host, "--with-timestamps"}
+	if configuration.Zabbix.Sender.Port != 0 {
+		commandline = append(commandline, "--port", strconv.Itoa(configuration.Zabbix.Sender.Port))
+	}
+	commandline = append(commandline, "--input-file", filename)
+	if verbose {
+		commandline = append(commandline, "-vv")
+	}
+
+	Log.Info("starting transmission with", "binary", senderPath, "arguments", commandline)
+	command := exec.Command(senderPath, commandline...)
+
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	command.Stdout = writer
+	command.Stderr = os.Stderr
+	err := command.Run()
+	result := b.String()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "zabbix_sender failed ", err, result)
+		return 5
+	}
+
+	Log.Info("transmitted", "result", result)
+	return 0
 }
 
 func fetch(session zabbix.Session, item zabbix.ItemResponseElement, date time.Time, window time.Duration) []zabbix.HistoryValue {
@@ -172,7 +219,7 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 	current, _ := strconv.ParseFloat(values[0].Value, 64)
 	// Sample timepoint
 	timestamp := time.Unix(values[0].Clock, values[0].Nano)
-	Log.Info("current value", "value", current, "exact timepoint", timestamp.Format("Mon 01-02 15:04:05"))
+	Log.Info("current value", "value", current, "exact timestamp", timestamp.Format("Mon 01-02 15:04:05"))
 
 	historicValues := make([]float64, 0)
 	// search with the exact timestamp of most recent sample
@@ -210,7 +257,6 @@ func average(values []float64) float64 {
  * Find matching Hosts by template filter
  */
 func collectHostsByTemplate(session zabbix.Session, configuration zabbix.Configuration) {
-
 	for index, templateConfiguration := range configuration.Templates {
 		Log.Debug("filtering templateHits with", "filter", templateConfiguration, "index", index)
 
@@ -222,7 +268,7 @@ func collectHostsByTemplate(session zabbix.Session, configuration zabbix.Configu
 			Log.Debug("adding template", "id", template.TemplateId, "name", template.Name)
 			templates[template.TemplateId] = template.Name
 		}
-		Log.Info("collected templates id's", "templateids", keysFromMap(templates))
+		Log.Info("collected templates", "templates", templates)
 	}
 }
 
@@ -292,7 +338,14 @@ func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, it
 			halfWindow := time.Duration(itemConfiguration.PastWeeks.Window / 2)
 			value, timestamp := compareWeeks(session, item, itemConfiguration.PastWeeks.Weeks, halfWindow*time.Second)
 			if math.IsNaN(value) == false {
+				if lines > 0 {
+					_, err := destination.Write([]byte{'\n'})
+					if err != nil {
+						Log.Warn("error writing item data", "error", err)
+					}
+				}
 				addSenderLine(hosts[item.HostID], item.Key, itemConfiguration.Postfix, timestamp, value)
+				lines++
 			} else {
 				Log.Warn("skipping item due to missing data", "item", item)
 			}
@@ -301,7 +354,10 @@ func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, it
 }
 
 func addSenderLine(hostname string, key string, postfix string, timestamp time.Time, value float64) {
-	line := fmt.Sprintf("\"%s\" %s%s %d %f\n", hostname, key, postfix, timestamp.Unix(), value)
+	line := fmt.Sprintf("\"%s\" %s%s %d %f", hostname, key, postfix, timestamp.Unix(), value)
+	_, err := destination.WriteString(line)
+	if err != nil {
+		Log.Warn("error writing item data", "error", err)
+	}
 	Log.Info("appending zabbix_sender line", "line", line)
-	destination.WriteString(line)
 }

@@ -14,9 +14,10 @@ type Configuration struct {
 			Password string
 		}
 
-		Trapper struct {
-			Host string
-			Port int
+		Sender struct {
+			Host   string
+			Port   int
+			Binary string
 		}
 	}
 
