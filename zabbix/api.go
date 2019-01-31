@@ -10,9 +10,9 @@ import (
 	"fmt"
 	logging "github.com/inconshreveable/log15"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"time"
-	"math/rand"
 )
 
 var Log = logging.New()
@@ -27,6 +27,8 @@ type Session struct {
 	Connection http.Client
 	// Authentication Token
 	Token string
+
+	ServerVersion string
 }
 
 type Request struct {
@@ -64,35 +66,66 @@ type loginResponse struct {
 	Error apiError `json:"error"`
 }
 
-type Value struct {
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/history/get
+ */
+type HistoryQuery struct {
+	ValueType int      `json:"history"`             // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Output    string   `json:"output"`              // extend | count
+	Hosts     string   `json:"hostids,omitempty"`   // host ids, numeric
+	Items     []string `json:"itemids"`             // item ids, numeric
+	From      int64    `json:"time_from,omitempty"` // timerange start. seconds since epoch
+	To        int64    `json:"time_till,omitempty"` // timerange end. seconds since epoch
+	Limit     int      `json:"limit,omitempty"`     // limit number of records
+	SortField string   `json:"sortfield"`           // clock|value|ns
+	SortOrder string   `json:"sortorder,omitempty"` // DESC|ASC
+
+	session Session
+}
+
+type historyQueryResponse struct {
+	Encoding string         `json:"jsonrpc"` // "2.0"
+	Items    []HistoryValue `json:"result"`
+
+	//	Id       string  `json:"id"` // referencing request id
+}
+
+type HistoryValue struct {
 	Value string `json:"value"`
 	Item  string `json:"itemid"`
 	Clock int64  `json:"clock,string"` // seconds since epoch
 	Nano  int64  `json:"ns,string"`    // nanoseconds
 }
 
-type historyQueryResponse struct {
-	Encoding string  `json:"jsonrpc"` // "2.0"
-	Items    []Value `json:"result"`
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/trend/get
+ */
+type TrendQuery struct {
+	Items     []string `json:"itemids"` // item ids, numeric
+	Trend     int      // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	From      int64    `json:"time_from,omitempty"` // timerange start. seconds since epoch
+	To        int64    `json:"time_till,omitempty"` // timerange end. seconds since epoch
+	Limit     int      `json:"limit,omitempty"`     // limit number of records
+	Output    []string `json:"output"`              // field selection "itemid", "clock", "num", "value_min", "value_avg", "value_max"
+	SortField string   `json:"sortfield"`           // clock|value|ns
+	SortOrder string   `json:"sortorder,omitempty"` // DESC|ASC
 
+	session Session
+}
+
+type trendQueryResponse struct {
+	Encoding string       `json:"jsonrpc"` // "2.0"
+	Items    []TrendValue `json:"result"`
 	//	Id       string  `json:"id"` // referencing request id
 }
 
-/**
-* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/history/get
- */
-type HistoryQuery struct {
-	History   int    `json:"history"`             // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
-	Output    string `json:"output"`              // extend | count
-	Hosts     string `json:"hostids,omitempty"`   // host ids, numeric
-	Items     string `json:"itemids"`             // item ids, numeric
-	From      int64  `json:"time_from,omitempty"` // timerange start. seconds since epoch
-	To        int64  `json:"time_till,omitempty"` // timerange end. seconds since epoch
-	SortField string `json:"sortfield"`           // clock|value|ns
-	Limit     int    `json:"limit,omitempty"`     // limit number of records
-	SortOrder string `json:"sortorder,omitempty"` // DESC|ASC
-
-	session Session
+type TrendValue struct {
+	Item     string `json:"itemid"`
+	Clock    int64  `json:"clock,string"` // seconds since epoch
+	Num      int64  `json:"num,string"`   // number of values per hour
+	MinValue string `json:"value_min"`
+	AvgValue string `json:"value_avg"`
+	MaxValue string `json:"value_max"`
 }
 
 /**
@@ -138,9 +171,9 @@ type ItemQuery struct {
 type ItemResponseElement struct {
 	ItemID      string `json:"itemid"`
 	HostID      string `json:"hostid"`
-	Type        int    `json:",string"` // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
-	Key         string `json:"key_"`    // Item key
-	Delay       string                  // sample interval in seconds
+	ValueType   int    `json:"value_type,string"` // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Key         string `json:"key_"`              // Item key
+	Delay       string // sample interval in seconds
 	Name        string
 	TemplateID  string
 	Description string
@@ -160,10 +193,10 @@ type HostQuery struct {
 	Filter                 map[string][]string `json:"filter,omitempty"`
 	Search                 map[string][]string `json:"search,omitempty"`
 	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
-	IncludeTemplates bool `json:"templated_hosts"` // Return both hosts and templates.
-	IncludeMonitored bool `json:"monitored_hosts"` // Return only monitored hosts.
+	IncludeTemplates       bool                `json:"templated_hosts"` // Return both hosts and templates.
+	IncludeMonitored       bool                `json:"monitored_hosts"` // Return only monitored hosts.
 
-	SortField              []string
+	SortField []string
 
 	session Session
 }
@@ -195,16 +228,38 @@ func Version() string {
  * Initialize history query
  */
 func (s *Session) NewHistoryQuery() HistoryQuery {
-	q := HistoryQuery{History: 3, SortField: "clock", Output: "extend", SortOrder: "DESC", session: *s}
+	q := HistoryQuery{ValueType: 3, SortField: "clock", Output: "extend", SortOrder: "DESC", session: *s}
 	return q
 }
 
-func (q *HistoryQuery) Query() []Value {
+func (q *HistoryQuery) Query() []HistoryValue {
 	response := historyQueryResponse{}
 	req := Request{session: q.session, request: q, response: &response, method: "history.get"}
 	err := req.query()
 	if err != nil {
 		Log.Error("failed to read history", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Items)})
+	return response.Items
+}
+
+/**
+ * Initialize trend query
+ */
+func (s *Session) NewTrendQuery(items []string, from time.Time, to time.Time) TrendQuery {
+	q := TrendQuery{Items: items, Output: []string{"itemid", "clock", "num", "value_min", "value_avg", "value_max"}, session: *s}
+	q.From = from.Unix()
+	q.To = to.Unix()
+	return q
+}
+
+func (q *TrendQuery) Query() []TrendValue {
+	response := trendQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "trend.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read trend", "error", err)
 		return nil
 	}
 	Log.Debug("loaded", logging.Ctx{"count": len(response.Items)})
@@ -344,14 +399,27 @@ func (query *Request) query() error {
 func Login(settings *Session, user string, password string) error {
 	//
 	uri := settings.URL
+
+	Log.Debug("reading server version", "uri", uri)
+	response, err := settings.Connection.Post(uri, contentType, bytes.NewReader([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"apiinfo.version\",\"id\":-1,\"auth\":null,\"params\":{}}")))
+	if err != nil {
+		return err
+	}
+
+	body, err := ioutil.ReadAll(response.Body)
+	defer response.Body.Close()
+	settings.ServerVersion = string(body)
+
+	Log.Debug("successfully conneted", "response body", settings.ServerVersion, "HTTP response", response)
+
 	auth := request{Encoding: "2.0", Method: "user.login", Params: auth{User: user, Password: password}, Id: requestEnumerator}
 	requestEnumerator++
 	message, err := json.Marshal(auth)
 	if err != nil {
 		return err
 	}
-	Log.Debug("connecting to", "url", uri)
-	response, err := settings.Connection.Post(uri, contentType, bytes.NewReader(message))
+	Log.Debug("authenticating with server", "username", user)
+	response, err = settings.Connection.Post(uri, contentType, bytes.NewReader(message))
 	if err != nil {
 		return err
 	}
@@ -360,7 +428,7 @@ func Login(settings *Session, user string, password string) error {
 		return fmt.Errorf("failed to authenticate. status code %d", response.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(response.Body)
+	body, err = ioutil.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}

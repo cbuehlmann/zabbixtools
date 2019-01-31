@@ -123,10 +123,10 @@ func main() {
 	destination.Close()
 }
 
-func fetch(session zabbix.Session, item zabbix.ItemResponseElement, date time.Time, window time.Duration) []zabbix.Value {
+func fetch(session zabbix.Session, item zabbix.ItemResponseElement, date time.Time, window time.Duration) []zabbix.HistoryValue {
 	query := session.NewHistoryQuery()
-	query.History = item.Type
-	query.Items = item.ItemID
+	query.ValueType = item.ValueType
+	query.Items = []string{item.ItemID}
 
 	query.From = date.Add(-window).Unix()
 	query.To = date.Add(+window).Unix()
@@ -139,7 +139,7 @@ func fetch(session zabbix.Session, item zabbix.ItemResponseElement, date time.Ti
 	return values
 }
 
-func getClosestValue(timepoint time.Time, values []zabbix.Value) zabbix.Value {
+func getClosestValue(timepoint time.Time, values []zabbix.HistoryValue) zabbix.HistoryValue {
 	closest := 3600.0 * 24 * 356 // 1Y
 	index := -1
 	for i, value := range values {
@@ -150,7 +150,7 @@ func getClosestValue(timepoint time.Time, values []zabbix.Value) zabbix.Value {
 	if index >= 0 {
 		return values[index]
 	} else {
-		return zabbix.Value{}
+		return zabbix.HistoryValue{}
 	}
 
 }
@@ -174,7 +174,7 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 	timestamp := time.Unix(values[0].Clock, values[0].Nano)
 	Log.Info("current value", "value", current, "exact timepoint", timestamp.Format("Mon 01-02 15:04:05"))
 
-	historicValues := make([]float64, weeks)
+	historicValues := make([]float64, 0)
 	// search with the exact timestamp of most recent sample
 	tp := timestamp
 	oneWeek := time.Hour * 24 * 7
@@ -183,11 +183,11 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 		closest := getClosestValue(tp, fetch(session, item, tp, window))
 		if closest.Clock != 0 {
 			value, _ := strconv.ParseFloat(closest.Value, 64)
-			historicValues[i] = value
+			historicValues = append(historicValues, value)
 			when := time.Unix(closest.Clock, closest.Nano)
-			Log.Info("historic value", log.Ctx{"value": value, "date": when.Format("Mon 01-02 15:04:05")})
+			Log.Info("historic value", "value", value, "date", when.Format("Mon 01-02 15:04:05"))
 		} else {
-			historicValues[i] = math.NaN()
+			Log.Warn("missing historic value", "around", tp.Format("Mon 01-02 15:04:05"))
 		}
 	}
 
@@ -200,14 +200,10 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 
 func average(values []float64) float64 {
 	sum := float64(0)
-	count := 0.0
 	for _, value := range values {
-		if value != math.NaN() {
-			sum = sum + value
-			count += 1.0
-		}
+		sum = sum + value
 	}
-	return sum / count
+	return sum / float64(len(values))
 }
 
 /**
@@ -276,7 +272,7 @@ func findItems(session zabbix.Session, configuration zabbix.Configuration) {
 	for index, itemFilter := range configuration.Items {
 		Log.Debug("processing items of filter", "index", index)
 		query := session.NewItemQuery(keysFromMap(hosts), itemFilter.Filter, itemFilter.Search)
-		query.SearchWildcardsEnabled = false
+		query.SearchWildcardsEnabled = true
 		items := query.Query()
 
 		if len(items) > 0 {

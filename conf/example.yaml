@@ -23,12 +23,12 @@ templates:
         - 3
 
 
-# 1b find hosts by host query
+# 1b find hosts by host query: all hosts starting with 'foo'
 hosts:
   - Any:
     search: # omit to process all hosts. search wildcard is *
       host:
-        - "a*"
+        - "foo*"
 
 # now process items of the given hosts
 items:
@@ -39,13 +39,13 @@ items:
     pastweeks:  # currently only past n weeks
       weeks: 3
       window: 600 # seconds => 10 min
-    postfix: .threeweeksdelta
+    postfix: .delta3w
 
-  - HTTP808:
+  - HTTP8080:
     filter:
       key_:
         - net.tcp.service.perf["http",,"8080"]
     pastweeks:  # currently only past n weeks
-      weeks: 3
+      weeks: 7
       window: 600 # seconds => 10 min
-    postfix: .threeweeksdelta
+    postfix: .delta7w
