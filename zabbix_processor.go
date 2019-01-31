@@ -41,6 +41,7 @@ func main() {
 	password := flag.String("password", "", "ZABBIX password")
 
 	// operation
+	allhosts := flag.Bool("all", false, "if no hosts are found, work on all hosts. this might block your server for a long time")
 	verbose := flag.Bool("verbose", false, "be verbose (log level debug)")
 	quiet := flag.Bool("quiet", false, "just print result. overrides -verbose")
 	output := flag.String("output", "-", "destination for processed values")
@@ -111,6 +112,12 @@ func main() {
 
 	collectHostsByTemplate(session, configuration)
 	collectHosts(session, configuration)
+
+	if len(hosts) == 0 && *allhosts == false {
+		Log.Warn("no hosts found by filter. to process all hosts, use the --all command line option")
+		return
+	}
+
 	findItems(session, configuration)
 
 	destination.Close()
@@ -237,11 +244,11 @@ func collectHosts(session zabbix.Session, configuration zabbix.Configuration) {
 			hosts[hostElement.HostID] = hostElement.Name
 		}
 
-		Log.Info("collected hosts", "hosts", hosts)
+		Log.Debug("collected hosts via template lookup", "hosts", hosts)
 	}
 
 	// collect hosts by filters
-	if configuration.Hosts != nil && len(configuration.Hosts) > 0 {
+	if len(configuration.Hosts) > 0 {
 
 		for index, hostConfiguration := range configuration.Hosts {
 			hostQuery := session.NewHostQuery([]string{}, hostConfiguration.Filter, hostConfiguration.Search)
@@ -249,12 +256,12 @@ func collectHosts(session zabbix.Session, configuration zabbix.Configuration) {
 			for _, hostElement := range hostElements {
 				hosts[hostElement.HostID] = hostElement.Name
 			}
-			Log.Info("collected hosts", "hosts", hosts, "index", index)
+			Log.Debug("collected hosts via host filter", "hosts", hosts, "index", index)
 		}
 
 	}
 
-	Log.Info("collected hosts", "hosts", keysFromMap(hosts))
+	Log.Info("working with the following hosts", "hosts", hosts)
 }
 
 func keysFromMap(input map[string]string) []string {
@@ -282,8 +289,8 @@ func findItems(session zabbix.Session, configuration zabbix.Configuration) {
 }
 
 func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, itemConfiguration zabbix.ItemConfiguration) {
-	for _, item := range items {
-		Log.Info("found item", "itemid", item.ItemID, "key", item.Key, "data", item)
+	for index, item := range items {
+		Log.Info(fmt.Sprintf("processing item %d/%d", index, len(items)), "itemid", item.ItemID, "key", item.Key, "data", item)
 		if itemConfiguration.PastWeeks.Weeks > 0 {
 
 			halfWindow := time.Duration(itemConfiguration.PastWeeks.Window / 2)
