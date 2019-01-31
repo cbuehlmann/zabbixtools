@@ -1,0 +1,51 @@
+#
+# Configuration example.
+# Is used by configuration_test.go
+#
+zabbix:
+  api:
+    URL: http://127.0.0.1/zabbix/api_jsonrpc.php    # url of the zabbix web api
+    username: zabbixapiuser
+    password: zabbixapipw
+  trapper:
+    host: 127.0.0.1
+    port: 10051
+
+# 1a discover hosts by template
+templates:
+  - Process Template:
+    filter:
+      name:
+        - Template OS Linux
+  - Search template by status:
+    search:
+      status:
+        - 3
+
+
+# 1b find hosts by host query
+hosts:
+  - Any:
+    search: # omit to process all hosts. search wildcard is *
+      host:
+        - "a*"
+
+# now process items of the given hosts
+items:
+  - System CPU:
+    search:
+      key_:
+        - "system.cpu"
+    pastweeks:  # currently only past n weeks
+      weeks: 3
+      window: 600 # seconds => 10 min
+    postfix: .threeweeksdelta
+
+  - HTTP808:
+    filter:
+      key_:
+        - net.tcp.service.perf["http",,"8080"]
+    pastweeks:  # currently only past n weeks
+      weeks: 3
+      window: 600 # seconds => 10 min
+    postfix: .threeweeksdelta

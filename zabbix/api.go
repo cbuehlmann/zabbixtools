@@ -12,13 +12,16 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+	"math/rand"
 )
 
 var Log = logging.New()
+var requestEnumerator int64 = rand.New(rand.NewSource(time.Now().Unix())).Int63()
 
 const contentType string = "application/json-rpc"
 
 type Session struct {
+	// ZABBIX web frontend base url
 	URL string
 	// reuse connection HTTP 1.1
 	Connection http.Client
@@ -26,12 +29,19 @@ type Session struct {
 	Token string
 }
 
+type Request struct {
+	session  Session
+	method   string
+	request  interface{}
+	response interface{}
+}
+
 // Note: json.Marshal does only process fields with upper case name
 type request struct {
 	Encoding string      `json:"jsonrpc"` // "2.0"
 	Method   string      `json:"method"`  // example: "user.login"
 	Params   interface{} `json:"params"`
-	Id       int         `json:"id"` // request id
+	Id       int64       `json:"id"` // request id
 	Auth     string      `json:"auth,omitempty"`
 }
 
@@ -49,7 +59,7 @@ type apiError struct {
 type loginResponse struct {
 	Encoding string `json:"jsonrpc"` // "2.0"
 	Result   string `json:"result"`
-	//Id       string `json:"id,omitempty"` // referencing request id
+	//Id       string `json:"id"` // referencing request id
 	// Error reporting
 	Error apiError `json:"error"`
 }
@@ -61,10 +71,11 @@ type Value struct {
 	Nano  int64  `json:"ns,string"`    // nanoseconds
 }
 
-type queryResponse struct {
+type historyQueryResponse struct {
 	Encoding string  `json:"jsonrpc"` // "2.0"
 	Items    []Value `json:"result"`
-//	Id       string  `json:"id"` // referencing request id
+
+	//	Id       string  `json:"id"` // referencing request id
 }
 
 /**
@@ -80,66 +91,239 @@ type HistoryQuery struct {
 	SortField string `json:"sortfield"`           // clock|value|ns
 	Limit     int    `json:"limit,omitempty"`     // limit number of records
 	SortOrder string `json:"sortorder,omitempty"` // DESC|ASC
+
+	session Session
+}
+
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/template/get
+ */
+type TemplateQuery struct {
+	Output                 string              `json:"output"` // extend | count
+	Filter                 map[string][]string `json:"filter,omitempty"`
+	Search                 map[string][]string `json:"search,omitempty"`
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
+
+	session Session
+}
+
+type templateQueryResponse struct {
+	Encoding string                 `json:"jsonrpc"` // "2.0"
+	Elements []TemplateResponseItem `json:"result"`  // Elements
+	//	Id       string  `json:"id"` // referencing request id
+}
+
+type TemplateResponseItem struct {
+	Host       string
+	Name       string
+	TemplateId string
+}
+
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/item/get
+ */
+type ItemQuery struct {
+	TemplateIDs            []string            `json:"templateids,omitempty"` // search for specific template id's
+	HostIDs                []string            `json:"hostids,omitempty"`
+	Output                 string              `json:"output"`           // extend | count
+	Filter                 map[string][]string `json:"filter,omitempty"` // possible filter
+	Search                 map[string][]string `json:"search,omitempty"` // possible search criteria
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
+
+	SortField []string
+
+	session Session
+}
+
+type ItemResponseElement struct {
+	ItemID      string `json:"itemid"`
+	HostID      string `json:"hostid"`
+	Type        int    `json:",string"` // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Key         string `json:"key_"`    // Item key
+	Delay       string                  // sample interval in seconds
+	Name        string
+	TemplateID  string
+	Description string
+}
+
+type itemQueryResponse struct {
+	Encoding string                `json:"jsonrpc"` // "2.0"
+	Elements []ItemResponseElement `json:"result"`  // items
+}
+
+/**
+* Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/host/get
+ */
+type HostQuery struct {
+	TemplateIDs            []string            `json:"templateids,omitempty"` // search for specific template id's
+	Output                 string              `json:"output"`                // extend | count
+	Filter                 map[string][]string `json:"filter,omitempty"`
+	Search                 map[string][]string `json:"search,omitempty"`
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
+	IncludeTemplates bool `json:"templated_hosts"` // Return both hosts and templates.
+	IncludeMonitored bool `json:"monitored_hosts"` // Return only monitored hosts.
+
+	SortField              []string
+
+	session Session
+}
+
+type hostQueryResponse struct {
+	Encoding string                `json:"jsonrpc"` // "2.0"
+	Elements []HostResponseElement `json:"result"`  // elements
+	//	Id       string  `json:"id"` // referencing request id
+}
+
+type HostResponseElement struct {
+	HostID     string `json:"hostid"`
+	TemplateID string
+	Host       string
+	Name       string
+	Status     string
+	Available  string
 }
 
 func init() {
 	Log.SetHandler(logging.DiscardHandler())
 }
 
-func newRequest(method string, payload interface{}) request {
-	return request{Encoding: "2.0", Method: method, Params: payload, Id: 1}
-}
-
 func Version() string {
-	return "0.0.1"
+	return "0.0.3"
 }
 
 /**
  * Initialize history query
  */
-func NewHistoryQuery() HistoryQuery {
-	return HistoryQuery{History: 3, SortField: "clock", Output: "extend", SortOrder: "DESC"}
+func (s *Session) NewHistoryQuery() HistoryQuery {
+	q := HistoryQuery{History: 3, SortField: "clock", Output: "extend", SortOrder: "DESC", session: *s}
+	return q
 }
 
-func History(settings Session, query HistoryQuery) ([]Value, error) {
-	return Query(settings, query, "history.get")
+func (q *HistoryQuery) Query() []Value {
+	response := historyQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "history.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read history", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Items)})
+	return response.Items
 }
 
-func Query(settings Session, query interface{}, api string) ([]Value, error) {
-	uri := settings.URL
-	request := newRequest(api, query)
-	request.Auth = settings.Token
+func (s *Session) NewTemplateQuery(filter map[string][]string, search map[string][]string) TemplateQuery {
+	q := TemplateQuery{Output: "extend", session: *s}
+	q.Filter = filter
+	q.Search = search
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
+	return q
+}
+
+func (q *TemplateQuery) Query() []TemplateResponseItem {
+	response := templateQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "template.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (s *Session) NewItemQuery(hostids []string, filter map[string][]string, search map[string][]string) ItemQuery {
+	q := ItemQuery{Output: "extend", session: *s}
+	//q.TemplateIDs = templateids
+	q.HostIDs = hostids
+	q.Filter = filter
+	q.Search = search
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
+	q.SortField = []string{"hostid"}
+	return q
+}
+
+func (q *ItemQuery) Query() []ItemResponseElement {
+	response := itemQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "item.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (s *Session) NewHostQuery(templateids []string, filter map[string][]string, search map[string][]string) HostQuery {
+	q := HostQuery{Output: "extend", session: *s}
+	q.TemplateIDs = templateids
+	q.Filter = filter
+	q.Search = search
+	if search != nil {
+		q.SearchWildcardsEnabled = true
+	}
+	// ignore templates by default
+	q.IncludeTemplates = false
+	q.IncludeMonitored = false
+	q.SortField = []string{"hostid"}
+	return q
+}
+
+func (q *HostQuery) Query() []HostResponseElement {
+	response := hostQueryResponse{}
+	req := Request{session: q.session, request: q, response: &response, method: "host.get"}
+	err := req.query()
+	if err != nil {
+		Log.Error("failed to read templates", "error", err)
+		return nil
+	}
+	Log.Debug("loaded", logging.Ctx{"count": len(response.Elements)})
+
+	return response.Elements
+}
+
+func (query *Request) query() error {
+	uri := query.session.URL
+	request := request{Encoding: "2.0", Method: query.method, Params: query.request, Id: requestEnumerator}
+	requestEnumerator++
+	request.Auth = query.session.Token
 	message, err := json.Marshal(request)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	Log.Debug("zabbix api call", "url", uri, "json", string(message))
 	start := time.Now()
-	response, err := settings.Connection.Post(settings.URL, contentType, bytes.NewReader(message))
+	response, err := query.session.Connection.Post(uri, contentType, bytes.NewReader(message))
 	end := time.Now()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	body, err := ioutil.ReadAll(response.Body)
 	defer response.Body.Close()
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	Log.Debug("result from server", "duration", (end.Nanosecond()-start.Nanosecond())/10000, "response", string(body[0:min(100, len(body)-1)]))
+	duration := end.Sub(start)
+	Log.Debug("result from server", "ms", 1.0*float64(duration.Nanoseconds())/(1000*1000), "response", string(body[0:min(700, len(body)-1)]))
 
-	result := queryResponse{}
-	err = json.Unmarshal(body, &result)
+	err = json.Unmarshal(body, query.response)
 	if err != nil {
 		Log.Error("failed to parse json", "error", err)
-		return nil, err
+		return err
 	}
 
-	Log.Debug("hits from server", "number", len(result.Items))
+	Log.Debug("received", "result", query.response)
 
-	return result.Items, nil
+	return nil
 }
 
 /**
@@ -160,7 +344,8 @@ func Query(settings Session, query interface{}, api string) ([]Value, error) {
 func Login(settings *Session, user string, password string) error {
 	//
 	uri := settings.URL
-	auth := newRequest("user.login", auth{User: user, Password: password})
+	auth := request{Encoding: "2.0", Method: "user.login", Params: auth{User: user, Password: password}, Id: requestEnumerator}
+	requestEnumerator++
 	message, err := json.Marshal(auth)
 	if err != nil {
 		return err
@@ -182,8 +367,7 @@ func Login(settings *Session, user string, password string) error {
 
 	defer response.Body.Close()
 
-
-	Log.Debug("result from server", "response", string(body[0:min(599, len(body)-1)]))
+	Log.Debug("received response from server", "response", string(body[0:min(700, len(body)-1)]))
 
 	result := loginResponse{}
 	err = json.Unmarshal(body, &result)
@@ -191,7 +375,7 @@ func Login(settings *Session, user string, password string) error {
 		return err
 	}
 
-	Log.Debug("received token", "json", string(body), "token", result.Result)
+	Log.Debug("received token", "token", result.Result)
 	if len(result.Result) < 5 || result.Error.Code != 0 {
 		return fmt.Errorf("failed to authenticate: %#v", result.Error)
 	}
