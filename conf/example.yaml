@@ -5,8 +5,8 @@
 zabbix:
   api:
     URL: http://127.0.0.1/zabbix/api_jsonrpc.php    # url of the zabbix web api
-    username: zabbixapi-user
-    password: zabbixapi-pw
+    username: zabbixapiuser
+    password: zabbixapipw
   trapper:
     host: 127.0.0.1
     port: 10051
@@ -24,28 +24,28 @@ templates:
 
 
 # 1b find hosts by host query
-hosts:  # omit to process all hosts
+hosts:
   - Any:
-    search:
+    search: # omit to process all hosts. search wildcard is *
       host:
-        - "*"
+        - "a*"
 
 # now process items of the given hosts
 items:
   - System CPU:
     search:
-      key:
-        - "system.cpu*"
+      key_:
+        - "system.cpu"
     pastweeks:  # currently only past n weeks
       weeks: 3
       window: 600 # seconds => 10 min
-      postfix: .threeweeksdelta
+    postfix: .threeweeksdelta
 
   - HTTP808:
-    search:
+    filter:
       key_:
         - net.tcp.service.perf["http",,"8080"]
     pastweeks:  # currently only past n weeks
       weeks: 3
       window: 600 # seconds => 10 min
-      Postfix: .threeweeksdelta
+    postfix: .threeweeksdelta

@@ -12,10 +12,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+	"math/rand"
 )
 
 var Log = logging.New()
-var requestEnumerator = 1
+var requestEnumerator int64 = rand.New(rand.NewSource(time.Now().Unix())).Int63()
 
 const contentType string = "application/json-rpc"
 
@@ -40,7 +41,7 @@ type request struct {
 	Encoding string      `json:"jsonrpc"` // "2.0"
 	Method   string      `json:"method"`  // example: "user.login"
 	Params   interface{} `json:"params"`
-	Id       int         `json:"id"` // request id
+	Id       int64       `json:"id"` // request id
 	Auth     string      `json:"auth,omitempty"`
 }
 
@@ -99,8 +100,8 @@ type HistoryQuery struct {
  */
 type TemplateQuery struct {
 	Output                 string              `json:"output"` // extend | count
-	Filter                 map[string][]string `json:"filter",omitempty`
-	Search                 map[string][]string `json:"search",omitempty`
+	Filter                 map[string][]string `json:"filter,omitempty"`
+	Search                 map[string][]string `json:"search,omitempty"`
 	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
 
 	session Session
@@ -122,24 +123,27 @@ type TemplateResponseItem struct {
 * Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/item/get
  */
 type ItemQuery struct {
-	TemplateIDs            []string            `json:"templateids"`      // search for specific template id's
+	TemplateIDs            []string            `json:"templateids,omitempty"` // search for specific template id's
+	HostIDs                []string            `json:"hostids,omitempty"`
 	Output                 string              `json:"output"`           // extend | count
-	Filter                 map[string][]string `json:"filter",omitempty` // possible filter
-	Search                 map[string][]string `json:"search",omitempty` // possible search criteria
-	SortField              []string
-	SearchWildcardsEnabled bool `json:"searchWildcardsEnabled"`
+	Filter                 map[string][]string `json:"filter,omitempty"` // possible filter
+	Search                 map[string][]string `json:"search,omitempty"` // possible search criteria
+	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
+
+	SortField []string
 
 	session Session
 }
 
 type ItemResponseElement struct {
-	ItemID     string `json:"itemid"`
-	HostID     string `json:"hostid"`
-	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
-	Key        string `json:"key_"` // Item key
-	Delay      string // sample interval in seconds
-	Name       string
-	TemplateId string
+	ItemID      string `json:"itemid"`
+	HostID      string `json:"hostid"`
+	Type        int    `json:",string"` // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
+	Key         string `json:"key_"`    // Item key
+	Delay       string                  // sample interval in seconds
+	Name        string
+	TemplateID  string
+	Description string
 }
 
 type itemQueryResponse struct {
@@ -151,14 +155,15 @@ type itemQueryResponse struct {
 * Refer to https://www.zabbix.com/documentation/4.0/manual/api/reference/host/get
  */
 type HostQuery struct {
-	TemplateIDs            []string            `json:"templateids",omitempty` // search for specific template id's
+	TemplateIDs            []string            `json:"templateids,omitempty"` // search for specific template id's
 	Output                 string              `json:"output"`                // extend | count
-	Filter                 map[string][]string `json:"filter",omitempty`
-	Search                 map[string][]string `json:"search",omitempty`
+	Filter                 map[string][]string `json:"filter,omitempty"`
+	Search                 map[string][]string `json:"search,omitempty"`
 	SearchWildcardsEnabled bool                `json:"searchWildcardsEnabled"`
-	SortField              []string
-
 	IncludeTemplates bool `json:"templated_hosts"` // Return both hosts and templates.
+	IncludeMonitored bool `json:"monitored_hosts"` // Return only monitored hosts.
+
+	SortField              []string
 
 	session Session
 }
@@ -170,13 +175,12 @@ type hostQueryResponse struct {
 }
 
 type HostResponseElement struct {
-	Host       string
 	HostID     string `json:"hostid"`
-	Type       string // 0 - numeric float; 1 - character; 2 - log; 3 - numeric unsigned; 4 - text.
-	Key        string `json:"key_"` // Item key
-	Delay      string // sample interval in seconds
+	TemplateID string
+	Host       string
 	Name       string
-	TemplateId string
+	Status     string
+	Available  string
 }
 
 func init() {
@@ -230,9 +234,10 @@ func (q *TemplateQuery) Query() []TemplateResponseItem {
 	return response.Elements
 }
 
-func (s *Session) NewItemQuery(templateids []string, filter map[string][]string, search map[string][]string) ItemQuery {
+func (s *Session) NewItemQuery(hostids []string, filter map[string][]string, search map[string][]string) ItemQuery {
 	q := ItemQuery{Output: "extend", session: *s}
-	q.TemplateIDs = templateids
+	//q.TemplateIDs = templateids
+	q.HostIDs = hostids
 	q.Filter = filter
 	q.Search = search
 	if search != nil {
@@ -263,6 +268,9 @@ func (s *Session) NewHostQuery(templateids []string, filter map[string][]string,
 	if search != nil {
 		q.SearchWildcardsEnabled = true
 	}
+	// ignore templates by default
+	q.IncludeTemplates = false
+	q.IncludeMonitored = false
 	q.SortField = []string{"hostid"}
 	return q
 }
@@ -304,7 +312,8 @@ func (query *Request) query() error {
 		return err
 	}
 
-	Log.Debug("result from server", "duration", (end.Nanosecond()-start.Nanosecond())/10000, "response", string(body[0:min(700, len(body)-1)]))
+	duration := end.Sub(start)
+	Log.Debug("result from server", "ms", 1.0*float64(duration.Nanoseconds())/(1000*1000), "response", string(body[0:min(700, len(body)-1)]))
 
 	err = json.Unmarshal(body, query.response)
 	if err != nil {

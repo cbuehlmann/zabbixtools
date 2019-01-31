@@ -46,7 +46,7 @@ func TestFilterToJson(t *testing.T) {
 	fmt.Fprintf(os.Stdout, "template 1 to json: %s\n", jsonString)
 
 	assert.Equal(t, 2, len(configuration.Items))
-	fmt.Fprintf(os.Stdout, "template 1 item filter: %v\n", configuration.Items[0])
+	fmt.Fprintf(os.Stdout, "item 1: %v\n", configuration.Items[0])
 }
 
 func TestExampleConfiguration(t *testing.T) {
