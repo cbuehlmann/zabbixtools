@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+	"io"
+	"io/ioutil"
 )
 
 /**
@@ -25,8 +27,9 @@ import (
  */
 
 var Log = log.New()
-var destination = os.Stdout
-var lines = 0
+
+// zabbix_sender format
+var zabbixSenderBytes bytes.Buffer
 
 // Template ID to Template Name
 var templates map[string]string = make(map[string]string, 0)
@@ -100,13 +103,6 @@ func main() {
 		configuration.Zabbix.Api.URL = *apiUrl
 	}
 
-	if *output != "-" {
-		destination, err = os.OpenFile(*output, os.O_WRONLY|os.O_CREATE, 0666)
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "cannot write file ", *output, err.Error())
-		}
-	}
-
 	session := zabbix.Session{URL: configuration.Zabbix.Api.URL}
 	Log.Info("authenticating", "server", session.URL)
 	err = zabbix.Login(&session, configuration.Zabbix.Api.Username, configuration.Zabbix.Api.Password)
@@ -126,12 +122,17 @@ func main() {
 
 	findItems(session, configuration)
 
-	// flush zabbix to disk
-	if os.Stdout != destination {
-		destination.Close()
+	if *output != "-" {
+		err := ioutil.WriteFile(*output, zabbixSenderBytes.Bytes(), 0644)
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "cannot write file ", *output, err)
+		}
+	} else {
+		// write to stdout
+		io.Copy(os.Stdout, bytes.NewReader(zabbixSenderBytes.Bytes()))
 	}
 
-	if *output != "-" && *nop == false && len(configuration.Zabbix.Sender.Host) > 0 {
+	if *nop == false && len(configuration.Zabbix.Sender.Host) > 0 {
 		exitCode := sendItemData(configuration, *output, *verbose)
 		os.Exit(exitCode)
 	}
@@ -148,6 +149,7 @@ func sendItemData(configuration zabbix.Configuration, filename string, verbose b
 		commandline = append(commandline, "--port", strconv.Itoa(configuration.Zabbix.Sender.Port))
 	}
 	commandline = append(commandline, "--input-file", filename)
+
 	if verbose {
 		commandline = append(commandline, "-vv")
 	}
@@ -159,6 +161,11 @@ func sendItemData(configuration zabbix.Configuration, filename string, verbose b
 	writer := bufio.NewWriter(&b)
 	command.Stdout = writer
 	command.Stderr = os.Stderr
+	if filename == "-" {
+		// in memory transfer
+		command.Stdin = bytes.NewReader(zabbixSenderBytes.Bytes())
+	}
+
 	err := command.Run()
 	result := b.String()
 	if err != nil {
@@ -190,8 +197,10 @@ func getClosestValue(timepoint time.Time, values []zabbix.HistoryValue) zabbix.H
 	closest := 3600.0 * 24 * 356 // 1Y
 	index := -1
 	for i, value := range values {
-		if closest > math.Abs(float64(timepoint.Unix()-value.Clock)) {
+		diff := math.Abs(float64(timepoint.Unix() - value.Clock))
+		if closest > diff {
 			index = i
+			closest = diff
 		}
 	}
 	if index >= 0 {
@@ -338,14 +347,7 @@ func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, it
 			halfWindow := time.Duration(itemConfiguration.PastWeeks.Window / 2)
 			value, timestamp := compareWeeks(session, item, itemConfiguration.PastWeeks.Weeks, halfWindow*time.Second)
 			if math.IsNaN(value) == false {
-				if lines > 0 {
-					_, err := destination.Write([]byte{'\n'})
-					if err != nil {
-						Log.Warn("error writing item data", "error", err)
-					}
-				}
 				addSenderLine(hosts[item.HostID], item.Key, itemConfiguration.Postfix, timestamp, value)
-				lines++
 			} else {
 				Log.Warn("skipping item due to missing data", "item", item)
 			}
@@ -354,8 +356,8 @@ func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, it
 }
 
 func addSenderLine(hostname string, key string, postfix string, timestamp time.Time, value float64) {
-	line := fmt.Sprintf("\"%s\" %s%s %d %f", hostname, key, postfix, timestamp.Unix(), value)
-	_, err := destination.WriteString(line)
+	line := fmt.Sprintf("\"%s\" %s%s %d %f\n", hostname, key, postfix, timestamp.Unix(), value)
+	_, err := zabbixSenderBytes.WriteString(line)
 	if err != nil {
 		Log.Warn("error writing item data", "error", err)
 	}

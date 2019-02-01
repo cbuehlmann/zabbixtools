@@ -82,9 +82,9 @@ func validateConfiguration(t *testing.T, configuration Configuration) {
 	assert.NotNil(t, configuration.Zabbix.Api)
 
 	assert.Equal(t, "http://127.0.0.1/zabbix/api_jsonrpc.php", configuration.Zabbix.Api.URL)
-	assert.Equal(t, "zabbixapi-user", configuration.Zabbix.Api.Username)
-	assert.Equal(t, "zabbixapi-pw", configuration.Zabbix.Api.Password)
+	assert.Equal(t, "zabbixapiuser", configuration.Zabbix.Api.Username)
+	assert.Equal(t, "zabbixapipw", configuration.Zabbix.Api.Password)
 
-	assert.Equal(t, "127.0.0.1", configuration.Zabbix.Trapper.Host)
-	assert.Equal(t, 10051, configuration.Zabbix.Trapper.Port)
+	assert.Equal(t, "127.0.0.1", configuration.Zabbix.Sender.Host)
+	assert.Equal(t, 10051, configuration.Zabbix.Sender.Port)
 }
