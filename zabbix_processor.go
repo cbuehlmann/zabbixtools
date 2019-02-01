@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"github.com/cbuehlmann/zabbixtools/zabbix"
 	log "github.com/inconshreveable/log15"
+	"io"
+	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
 	"strconv"
 	"time"
-	"io"
-	"io/ioutil"
 )
 
 /**
