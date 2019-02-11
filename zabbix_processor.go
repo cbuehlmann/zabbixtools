@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -356,7 +357,8 @@ func processItems(session zabbix.Session, items []zabbix.ItemResponseElement, it
 }
 
 func addSenderLine(hostname string, key string, postfix string, timestamp time.Time, value float64) {
-	line := fmt.Sprintf("\"%s\" %s%s %d %f\n", hostname, key, postfix, timestamp.Unix(), value)
+	newKey := strings.Replace(key, "[", postfix + "[" ,1)
+	line := fmt.Sprintf("\"%s\" %s %d %f\n", hostname, newKey, timestamp.Unix(), value)
 	_, err := zabbixSenderBytes.WriteString(line)
 	if err != nil {
 		Log.Warn("error writing item data", "error", err)
