@@ -234,7 +234,8 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 	historicValues := make([]float64, 0)
 	// search with the exact timestamp of most recent sample
 	tp := timestamp
-	oneWeek := time.Hour * 24 * 7
+	//oneWeek := time.Hour * 24 * 7
+	oneWeek := time.Hour * 24
 	for i := 0; i < weeks; i++ {
 		tp = tp.Add(-oneWeek) // step one week back
 		closest := getClosestValue(tp, fetch(session, item, tp, window))
@@ -256,12 +257,19 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 }
 
 func average(values []float64) float64 {
+	if len(values) > 2 {
+		sort.Float64s(values)
+		values = values[1 : len(values)-1]
+	}
+
 	sum := float64(0)
-	for _, value := range values {
+
+	for _, value := range values{
 		sum = sum + value
 	}
 	return sum / float64(len(values))
 }
+
 
 /**
  * Find matching Hosts by template filter
