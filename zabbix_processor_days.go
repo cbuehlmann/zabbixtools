@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sort"
 )
 
 /**
@@ -257,7 +258,13 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 }
 
 func average(values []float64) float64 {
+	if len(values) > 2 {
+		sort.Float64s(values)
+		values = values[1 : len(values)-1]
+	}
+
 	sum := float64(0)
+
 	for _, value := range values {
 		sum = sum + value
 	}
