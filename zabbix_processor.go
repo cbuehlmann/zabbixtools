@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sort"
 )
 
 /**
@@ -234,8 +235,8 @@ func compareWeeks(session zabbix.Session, item zabbix.ItemResponseElement, weeks
 	historicValues := make([]float64, 0)
 	// search with the exact timestamp of most recent sample
 	tp := timestamp
-	//oneWeek := time.Hour * 24 * 7
-	oneWeek := time.Hour * 24
+	oneWeek := time.Hour * 24 * 7
+	//oneWeek := time.Hour * 24
 	for i := 0; i < weeks; i++ {
 		tp = tp.Add(-oneWeek) // step one week back
 		closest := getClosestValue(tp, fetch(session, item, tp, window))
